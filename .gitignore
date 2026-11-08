@@ -4,6 +4,9 @@ spike/out/
 # Raw IMF response: 2.8 MB, kept as a 30-day workflow artifact, not in git
 data/irfcl_gold_raw.csv
 
+# Local Claude Code config (dev server launcher, local settings)
+.claude/
+
 __pycache__/
 *.pyc
 .DS_Store

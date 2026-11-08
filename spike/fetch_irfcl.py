@@ -126,8 +126,17 @@ def is_unit_slip(ratio):
     return any(abs(ratio / p - 1) < 0.01 or abs(ratio * p - 1) < 0.01 for p in (1e3, 1e6))
 
 
+def is_dropout(before, value, after):
+    """One month far off both neighbours, which agree with each other within 5%: a gap filled
+    with zero or a typo (Kazakhstan 2026-03 = 0 t between 347.6 t and 354.3 t). Real sales
+    don't snap back the next month like that (Norway and Canada stayed at zero)."""
+    if before <= 0 or after <= 0:
+        return False
+    return abs(after / before - 1) < 0.05 and abs(value / ((before + after) / 2) - 1) > 0.5
+
+
 def screen(series):
-    """Remove values that can only be unit errors, in place. Returns {country: [(month, tonnes, reason)]}."""
+    """Remove values that can only be reporting errors, in place. Returns {country: [(month, tonnes, reason)]}."""
     rejected = {}
     for code, s in series.items():
         if code in AGGREGATES:
@@ -137,6 +146,10 @@ def screen(series):
         for a, b in zip(ms, ms[1:]):
             if s[a] > 0 and s[b] > 0 and b not in bad and is_unit_slip(s[b] / s[a]):
                 bad[b] = f"x{s[b] / s[a]:.4g} jump from {a}"
+        ok = [m for m in ms if m not in bad]
+        for a, b, c in zip(ok, ok[1:], ok[2:]):
+            if is_dropout(s[a], s[b], s[c]):
+                bad[b] = f"one-month dropout ({s[b]:.1f} t between {s[a]:.1f} and {s[c]:.1f})"
         if bad:
             rejected[code] = [(m, s.pop(m), why) for m, why in sorted(bad.items())]
     for code in [c for c, s in series.items() if not s]:
@@ -176,7 +189,7 @@ def append_log(path, run, code):
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore", lineterminator="\n")
         if new:
             w.writeheader()
         w.writerow(row)
@@ -250,7 +263,7 @@ def main(argv, run):
     else:
         print("WARN USA not in the data, so units can't be confirmed against the anchor.")
 
-    print("\n== Dropped as unit errors in national submissions ==")
+    print("\n== Dropped as reporting errors in national submissions ==")
     for code, items in sorted(rejected.items()):
         whole = code not in series
         reasons = sorted({why.split(" from ")[0] for _, _, why in items})
