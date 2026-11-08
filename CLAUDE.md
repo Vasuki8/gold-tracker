@@ -1,6 +1,8 @@
 # Gold Tracker
 
-**Status (2026-11-08):** v1 built. Git repo initialized (branch `main`). `.github/workflows/fetch-irfcl.yml` runs `spike/fetch_irfcl.py` daily and commits the cleaned JSON; the v1 page (`index.html`, `assets/`) is built and checked locally (desktop, mobile, light, dark). Not yet on GitHub: the repo, the first workflow run and GitHub Pages are waiting on `gh auth login`. Brainstorming continues in regular Claude chat, building happens here in Claude Code.
+**Status (2026-11-08):** v1 live. Repo: https://github.com/Vasuki8/gold-tracker (public). Page: https://vasuki8.github.io/gold-tracker/ (GitHub Pages, branch `main`, root). The daily job ran for the first time by hand on 2026-11-08 and passed; the two-week reliability test is under way. Brainstorming continues in regular Claude chat, building happens here in Claude Code.
+- Pushing from this machine works through Git Credential Manager. The `gh` CLI is not logged in, so repo settings and manual workflow runs go through the GitHub web UI (the built-in browser pane is signed in) or need `gh auth login` first.
+- Commits by the workflow's `GITHUB_TOKEN` do trigger the Pages rebuild, so new data reaches the live page without extra steps.
 
 ## Layout
 - `spike/fetch_irfcl.py`: fetch + clean, standard library only. `--out DIR` (the workflow uses `data/`), `--log FILE` (one CSV row per run).
@@ -53,12 +55,11 @@ Every data source is something that can break. Limit scope by number of sources,
 
 ## Riskiest assumption
 That the v1 source (IMF API or WGC download) can be fetched reliably by a script.
-**Status:** one live fetch worked (under 1 s, 2.8 MB, 2026-11-08). Reliability over weeks not yet tested.
+**Status:** live fetches work from this machine and from GitHub's runners (2026-11-08). Reliability over weeks is being tested (see Next step).
 
 ## Next step
-1. Owner runs `gh auth login`; then create the public repo, push, enable GitHub Pages (branch `main`, root), and trigger the first workflow run by hand.
-2. Two-week reliability test: the daily job runs about 14 times; count `fail` / `crash` rows and `tries` > 1 in `data/fetch_log.csv`. One success doesn't prove reliability: the SDMX 2.1 URL another project used recently already fails, so the IMF API is still moving.
-3. After the test: the direction-flip alert (v1 item 3), from the same job.
+1. Two-week reliability test, 2026-11-08 to about 2026-11-22: the daily job (06:23 UTC) runs about 14 times; count `fail` / `crash` rows and `tries` > 1 in `data/fetch_log.csv`. One success doesn't prove reliability: the SDMX 2.1 URL another project used recently already fails, so the IMF API is still moving. Run 1 (manual, 2026-11-08 08:44 UTC): pass, HTTP 200, 1 try, 0.8 s, 2.77 MB, and it already picked up new IMF months that had appeared since the morning's fetch.
+2. After the test: the direction-flip alert (v1 item 3), from the same job.
 
 ## Spike findings (2026-11-08, first live run)
 - **Endpoint.** IFS and the old `dataservices.imf.org` API are gone. Gold is IRFCL line 56, indicator `IRFCLDT1_IRFCL56V_FTO`, monthly. Only SDMX 3.0 works: `https://api.imf.org/external/sdmx/3.0/data/dataflow/IMF.STA/IRFCL/+/*.IRFCLDT1_IRFCL56V_FTO.*.M` with `Accept: application/vnd.sdmx.data+csv;version=2.0.0`. No API key. One request returns every country (2.8 MB, under 1 s). The SDMX 2.1 URL answers 403 / 404.
