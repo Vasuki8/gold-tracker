@@ -1,0 +1,66 @@
+# Daily fetch of IMF IRFCL gold reserves (the two-week reliability test, then the v1 data feed).
+# Every run appends a row to data/fetch_log.csv. data/gold_tonnes.json is committed only when
+# the run passed and the IMF data actually changed. A failed run fails the job, so GitHub
+# emails the repo owner.
+name: Fetch IMF gold reserves
+
+on:
+  schedule:
+    - cron: "23 6 * * *" # 06:23 UTC daily; off the hour, when GitHub's scheduler is busiest
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-irfcl
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch and clean IRFCL gold data
+        id: fetch
+        continue-on-error: true
+        run: python3 spike/fetch_irfcl.py --out data --log data/fetch_log.csv
+
+      - name: Keep the raw IMF response for 30 days
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: irfcl-raw-${{ github.run_id }}
+          path: data/irfcl_gold_raw.csv
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Commit the log row, and the data if it changed
+        env:
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$FETCH_OUTCOME" != "success" ]; then
+            # Never commit data from a failed run; keep only the log row.
+            git restore data/gold_tonnes.json 2>/dev/null || rm -f data/gold_tonnes.json
+          fi
+          git add data/fetch_log.csv
+          if [ -f data/gold_tonnes.json ]; then git add data/gold_tonnes.json; fi
+          if git diff --cached --quiet -- data/gold_tonnes.json; then
+            msg="Fetch log: $FETCH_OUTCOME"
+          else
+            newest=$(tail -n 1 data/fetch_log.csv | cut -d, -f8)
+            msg="IMF gold data update (newest month $newest)"
+          fi
+          git diff --cached --quiet || git commit -m "$msg"
+          git pull --rebase --quiet origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+
+      - name: Fail the run if the fetch failed
+        if: steps.fetch.outcome != 'success'
+        run: |
+          echo "::error::IRFCL fetch or checks failed. See the 'Fetch and clean' step log."
+          exit 1

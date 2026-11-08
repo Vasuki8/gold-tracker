@@ -1,0 +1,10 @@
+# Spike scratch output (the daily job writes to data/ instead)
+spike/out/
+
+# Raw IMF response: 2.8 MB, kept as a 30-day workflow artifact, not in git
+data/irfcl_gold_raw.csv
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
