@@ -1,6 +1,12 @@
 # Gold Tracker
 
-**Status (2026-11-08):** Spike stage. `spike/fetch_irfcl.py` fetches and cleans the IMF data; the first live run passed after fixes (see Spike findings). The folder is not a git repo yet. Scope below came out of the first brainstorm session; brainstorming continues in regular Claude chat, building happens here in Claude Code.
+**Status (2026-11-08):** v1 built. Git repo initialized (branch `main`). `.github/workflows/fetch-irfcl.yml` runs `spike/fetch_irfcl.py` daily and commits the cleaned JSON; the v1 page (`index.html`, `assets/`) is built and checked locally (desktop, mobile, light, dark). Not yet on GitHub: the repo, the first workflow run and GitHub Pages are waiting on `gh auth login`. Brainstorming continues in regular Claude chat, building happens here in Claude Code.
+
+## Layout
+- `spike/fetch_irfcl.py`: fetch + clean, standard library only. `--out DIR` (the workflow uses `data/`), `--log FILE` (one CSV row per run).
+- `.github/workflows/fetch-irfcl.yml`: daily at 06:23 UTC plus manual runs. Appends to `data/fetch_log.csv` every run (the reliability record); commits `data/gold_tonnes.json` only when the run passed and the data changed; keeps the raw IMF CSV as a 30-day artifact; a failed run fails the job so GitHub emails the owner.
+- `data/gold_tonnes.json`: committed data, no timestamp inside, so git history shows only real IMF revisions. Seeded from the 2026-11-08 response.
+- `index.html`, `assets/app.js`, `assets/style.css`: the page. Plain JS drawing SVG, no build step, no libraries. Served from the repo root by GitHub Pages (`.nojekyll` skips Jekyll). Local preview: `python -m http.server 8765` in the repo root (opening the file directly can't load the JSON).
 
 ## What it is
 A personal project (the owner is the only user) that tracks gold accumulation and selling by central banks and large institutions. No audience, no monetization, no need to differentiate from existing sites (WGC Goldhub, Trading Economics).
@@ -27,7 +33,14 @@ Central bank gold trades are private, so individual transactions can't be seen. 
 - **v2 Daily movement:** GLD/IAU daily holdings, plus an alert to the owner (email or Telegram) when new central bank data lands.
 - **v3 Detective work:** CFTC positioning; Swiss exports vs. China's reported reserves ("the gap").
 - **Parked:** 13F, LBMA vaults, user accounts, anything real-time.
-- **Proposed v1 change (2026-11-08 chat, not yet confirmed by the owner):** because the tracker is one slow macro input, lead with a few numbers rather than per-country detail: (1) reported net central bank buying, rolling 3 and 12 months, and whether it is speeding up or slowing; (2) who is buying (concentration: China and Poland lead in 2026); (3) an alert when the direction flips. Per-country charts stay, lower on the page. Count a month in the totals only once nearly all holdings have reported (ragged reporting, see Spike findings). v2 daily ETF data drops in priority under the working assumption in Purpose.
+- **v1 page layout (confirmed by the owner 2026-11-08):** headline numbers first, because the tracker is one slow macro input: (1) reported net central bank buying, rolling 3 and 12 months, and whether it is speeding up or slowing; (2) who is buying (concentration: Poland and China lead in 2026); then the 12-month trend since 2000, monthly bars, buyers and sellers, the top-15 holders table, and one chart per holder. Still to do: (3) an alert when the direction flips. v2 daily ETF data drops in priority under the working assumption in Purpose.
+- **v1 coverage (settled 2026-11-08):** top 15 holders *that report to IRFCL* (includes the ECB), Uzbekistan noted as missing. No second source.
+- **Hosting (owner, 2026-11-08):** public GitHub repo + GitHub Pages.
+
+## How the page counts a month
+- A holder's change in month m = its value at m minus its previous available value, looking back up to 3 months (so a dropped error value doesn't hide the move around it).
+- Each active holder (reported within 6 months of the newest month) gets an *activity* weight: the sum of its absolute monthly changes over its own last 12 reported months. Month m enters the totals once holders with 90% of total activity have reported it. Weighting by holdings instead would let the US (26% of all gold, never changes, reports last) delay every total by months; by activity it weighs nothing, and Turkey (big swings) weighs a lot.
+- First run (data of 2026-11-08): totals complete through Aug 2026 (Sep 62% reported, because Turkey hadn't filed). +320 t net in the 12 months to Aug 2026, +308 t in the 12 months before; last 3 months +159 t, about +634 t a year, so "speeding up". Poland and China are 56% of gross reported buying.
 
 ## Architecture direction
 - No server and no database. A scheduled GitHub Actions job fetches the data, commits JSON files, and rebuilds a static site (GitHub Pages or Cloudflare Pages).
@@ -43,8 +56,9 @@ That the v1 source (IMF API or WGC download) can be fetched reliably by a script
 **Status:** one live fetch worked (under 1 s, 2.8 MB, 2026-11-08). Reliability over weeks not yet tested.
 
 ## Next step
-1. Run `python spike/fetch_irfcl.py` as a scheduled GitHub Actions job, daily for about 2 weeks, and count failures. One success doesn't prove reliability: the SDMX 2.1 URL another project used recently already fails, so the IMF API is still moving. GitHub emails the owner when a scheduled run fails.
-2. Settle v1 scope. IRFCL has every big holder except Uzbekistan. Proposed: v1 = top 15 holders *that report to IRFCL* (plus the ECB), with Uzbekistan noted as missing, rather than adding a second source.
+1. Owner runs `gh auth login`; then create the public repo, push, enable GitHub Pages (branch `main`, root), and trigger the first workflow run by hand.
+2. Two-week reliability test: the daily job runs about 14 times; count `fail` / `crash` rows and `tries` > 1 in `data/fetch_log.csv`. One success doesn't prove reliability: the SDMX 2.1 URL another project used recently already fails, so the IMF API is still moving.
+3. After the test: the direction-flip alert (v1 item 3), from the same job.
 
 ## Spike findings (2026-11-08, first live run)
 - **Endpoint.** IFS and the old `dataservices.imf.org` API are gone. Gold is IRFCL line 56, indicator `IRFCLDT1_IRFCL56V_FTO`, monthly. Only SDMX 3.0 works: `https://api.imf.org/external/sdmx/3.0/data/dataflow/IMF.STA/IRFCL/+/*.IRFCLDT1_IRFCL56V_FTO.*.M` with `Accept: application/vnd.sdmx.data+csv;version=2.0.0`. No API key. One request returns every country (2.8 MB, under 1 s). The SDMX 2.1 URL answers 403 / 404.
@@ -53,6 +67,7 @@ That the v1 source (IMF API or WGC download) can be fetched reliably by a script
 - **Coverage.** 87 holders plus the euro-area aggregate (`G163`, skip it), 1999-12 to 2026-10. Present: US, Germany, Italy, France, China, Russia, Switzerland, India, Japan, Turkey, Poland, Netherlands, ECB (`EZB`), Portugal, Kazakhstan, Saudi Arabia, UK. Missing: Uzbekistan.
 - **Ragged reporting.** Countries lag differently: in Nov 2026 most are at September, the US at July, the UK and Netherlands at October. The leaderboard must use each country's own latest month and show which month that is. Some series are stale (Brazil once its errors are dropped, Canada since 2019, New Zealand since 2024).
 - **Unit errors in national submissions.** Angola (whole series) and Brazil (x1000 from 2026-03) report more gold than anyone holds. The script drops values above 9,000 t and month-on-month jumps of exactly x1000 or x1,000,000, and lists what it dropped. A "jump over 25%" rule was wrong: it flags real moves (Hungary x10 in Oct 2018; Norway and Canada selling to zero).
+- **One-month dropouts.** Some submissions have a single month far off two neighbours that agree within 5%, e.g. Kazakhstan 2026-03 = 0 t between 347.6 t and 354.3 t, which would show as a fake 460 t sale and re-buy. The script drops these (15 values across 11 holders; all are zeros or spikes that snap back). Turkey's 2026-03 drop (822 → 694 → 732 t) doesn't snap back and is kept as real.
 - **WGC.** Goldhub's country holdings table re-publishes the IMF figures, so it adds nothing as a second copy (only backfill for countries IRFCL lacks, such as Uzbekistan). Its quarterly Gold Demand Trends estimate of *total* central bank buying, including unreported purchases, is different: the only public measure of the undisclosed share. A candidate later source, quarterly.
 - **Tooling.** Claude's sandboxes can't reach api.imf.org. Live runs happen on this machine or on GitHub's runners. `python spike/fetch_irfcl.py --raw spike/out/irfcl_gold_raw.csv` re-runs on the saved response without the network.
 
