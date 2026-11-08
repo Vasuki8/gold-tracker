@@ -3,45 +3,64 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#000000">
   <title>Central Bank Gold Tracker</title>
   <meta name="description" content="Reported central bank gold holdings from the IMF, updated daily: who is buying, how fast, and how much of the world's reserves are now gold.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="assets/style.css">
   <script src="assets/app.js" defer></script>
 </head>
 <body>
-  <div class="wrap">
-    <header class="page-head">
-      <p class="eyebrow">Personal tracker · IMF IRFCL data, checked daily</p>
-      <h1>Central bank gold</h1>
-      <p class="lede">Reported official gold holdings. A slow macro gauge: are central banks adding gold, who is doing it, is the pace rising or falling, and how much of their reserves is now gold?</p>
-      <p class="freshness" id="freshness" role="status">Loading data…</p>
-      <noscript><p class="freshness">This page needs JavaScript to draw its charts. The data itself is in <a href="data/gold_tonnes.json">data/gold_tonnes.json</a> and <a href="data/reserves_usd.json">data/reserves_usd.json</a>.</p></noscript>
-      <nav class="toc" aria-label="Sections">
-        <a href="#gauge">Gauge</a>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="app-header">
+    <div class="bar">
+      <a class="brand" href="#top" aria-label="Central bank gold, back to top">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <span class="brand-title">Central Bank Gold</span>
+          <span class="brand-tag">Official reserves · IMF IRFCL · daily</span>
+        </span>
+      </a>
+      <nav class="tabs" aria-label="Sections">
+        <a href="#gauge">Overview</a>
         <a href="#trend">Trend</a>
         <a href="#years">Years</a>
         <a href="#months">Months</a>
         <a href="#who">Who</a>
         <a href="#groups">Groups</a>
         <a href="#momentum">Momentum</a>
-        <a href="#reserves">Share of reserves</a>
-        <a href="#board">Largest holders</a>
-        <a href="#country">One holder</a>
+        <a href="#reserves">Reserves</a>
+        <a href="#board">Holders</a>
+        <a href="#country">Holder</a>
         <a href="#method">Method</a>
       </nav>
-    </header>
+    </div>
+  </header>
 
-    <main>
-      <section class="card" id="gauge" aria-labelledby="gauge-h">
-        <h2 id="gauge-h">The gauge</h2>
-        <p class="sub" id="gauge-sub"></p>
-        <div class="tiles" id="tiles"></div>
-        <p class="caveat">Reported holdings only. The World Gold Council estimates that most central bank buying is not disclosed by country (about 63% of activity in Q3 2026), so the real total is larger than this. Read these numbers for direction and pace, not the full amount.</p>
+  <div class="wrap" id="top">
+    <p class="ticker" id="ticker" role="status">Loading data…</p>
+    <noscript><p class="ticker">This page needs JavaScript to draw its charts. The data itself is in <a href="data/gold_tonnes.json">data/gold_tonnes.json</a> and <a href="data/reserves_usd.json">data/reserves_usd.json</a>.</p></noscript>
+
+    <main id="main">
+      <section id="gauge" aria-label="Overview">
+        <div class="card hero" id="hero"></div>
+        <div class="stat-groups" id="stat-groups"></div>
+        <p class="caveat"><span class="tag">Reported only</span> The World Gold Council estimates that most central bank buying is not disclosed by country (about 63% of activity in Q3 2026), so the real total is larger than this. Read these numbers for direction and pace, not the full amount.</p>
+        <p class="freshness" id="freshness"></p>
       </section>
 
       <section class="card" id="trend" aria-labelledby="trend-h">
-        <h2 id="trend-h">Net buying over the past 12 months</h2>
+        <div class="panel-head">
+          <h2 id="trend-h">Net buying · rolling 12 months</h2>
+          <div class="seg" id="trend-range" role="group" aria-label="Time range">
+            <button type="button" data-years="0" aria-pressed="true">All</button>
+            <button type="button" data-years="10" aria-pressed="false">10Y</button>
+            <button type="button" data-years="5" aria-pressed="false">5Y</button>
+          </div>
+        </div>
         <p class="sub">Sum of all reported changes in the 12 months up to each point. Above zero: central banks were adding gold overall. Numbered markers are explained below the chart.</p>
         <div class="chart" id="chart-rolling"></div>
         <ol class="marks-key" id="marks-key"></ol>
@@ -140,7 +159,7 @@
       </section>
     </main>
 
-    <footer class="page-foot">
+    <footer class="page-foot" id="foot">
       <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>). A personal project, not investment advice.</p>
     </footer>
   </div>

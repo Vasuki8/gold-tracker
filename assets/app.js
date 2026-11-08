@@ -83,6 +83,9 @@ const tickText = (v) => `${v < 0 ? MINUS : ""}${NF0.format(Math.abs(v))}`;
 const pctTick = (v) => `${Math.round(v * 100)}%`;
 const usdTick = (v) => `$${NF0.format(v)}`;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+// Up/down tone for text: green/red, and never color alone (always a sign or an arrow).
+const tone = (v, eps = 0.05) => (v > eps ? "pos" : v < -eps ? "neg" : null);
+const arrow = (v, eps = 0.05) => (v > eps ? "▲" : v < -eps ? "▼" : "●");
 
 /* ---------- DOM helpers (text always goes in as text nodes, never as HTML) ---------- */
 
@@ -105,6 +108,8 @@ function s(tag, attrs = {}, ...kids) {
   return e;
 }
 const $ = (id) => document.getElementById(id);
+const sv = (v) => h("span", { class: tone(v) }, signed(v));
+const delta = (v, text, eps = 0.05) => h("span", { class: tone(v, eps) }, `${arrow(v, eps)} ${text}`);
 // replaceChildren() would turn a null into the text "null", so optional pieces are filtered out first.
 const put = (id, ...kids) => $(id).replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
 
@@ -671,7 +676,7 @@ function hbarChart(container, { rows, label, tipRows, splitAt, fmt = signed, neu
   });
 }
 
-function sparkline(values, w = 96, ht = 24) {
+function sparkline(values, w = 96, ht = 24, cls = "") {
   let lo = Math.min(...values), hi = Math.max(...values);
   // Never stretch less than 5% of the level (or 10 t) over the full height: a 0.2 t revision
   // on 1,040 t must look flat, not like a cliff.
@@ -680,7 +685,7 @@ function sparkline(values, w = 96, ht = 24) {
   const X = (k) => 2 + (k / Math.max(1, values.length - 1)) * (w - 6);
   const Y = (v) => (hi === lo ? ht / 2 : 3 + (1 - (v - lo) / (hi - lo)) * (ht - 6));
   const d = values.map((v, k) => `${k ? "L" : "M"}${X(k).toFixed(1)},${Y(v).toFixed(1)}`).join("");
-  return s("svg", { class: "spark", width: w, height: ht, viewBox: `0 0 ${w} ${ht}`, "aria-hidden": "true" },
+  return s("svg", { class: `spark ${cls}`, width: w, height: ht, viewBox: `0 0 ${w} ${ht}`, "aria-hidden": "true" },
     s("path", { d, class: "spark-line" }),
     s("circle", { cx: X(values.length - 1), cy: Y(values.at(-1)), r: 3, class: "spark-dot" }));
 }
@@ -722,54 +727,99 @@ function shareYearAgo(r) {
   return { now, then };
 }
 
-function renderGauge(m, r) {
+function headline(m) {
   const c = m.complete;
   const r12 = m.sumNet(c - 11, c), prev12 = m.sumNet(c - 23, c - 12);
-  const r3 = m.sumNet(c - 2, c), pace = r3 * 4;
-  const word = trendWord(r12, pace);
+  const r3 = m.sumNet(c - 2, c);
   const buyers = m.byCountry.filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
+  const sellers = m.byCountry.filter((x) => x.v < 0).sort((a, b) => a.v - b.v);
   const gross = buyers.reduce((a, x) => a + x.v, 0);
   const top2 = buyers.slice(0, 2);
-  const share = gross ? top2.reduce((a, x) => a + x.v, 0) / gross : 0;
+  return { c, r12, prev12, r3, pace: r3 * 4, buyers, sellers, top2,
+    share: gross ? top2.reduce((a, x) => a + x.v, 0) / gross : 0 };
+}
 
-  $("gauge-sub").textContent = `All holders reporting to the IMF, through ${mLabel(c)}, the latest month that is nearly fully reported.`;
-  const spark = m.rolling12.slice(-36).map((p) => p.v);
-  const tiles = [
-    h("div", { class: "tile hero" },
-      h("p", { class: "tile-label" }, "Net reported buying, last 12 months"),
-      h("p", { class: "tile-value" }, signed(r12)),
-      h("p", { class: "tile-sub" }, mRange(c - 11, c)),
-      h("p", { class: "tile-delta" }, h("strong", {}, `${r12 >= prev12 ? "▲" : "▼"} ${signed(r12 - prev12)}`),
-        ` vs the 12 months before (${signed(prev12)})`),
-      sparkline(spark, 190, 32)),
-    h("div", { class: "tile" },
-      h("p", { class: "tile-label" }, "Last 3 months"),
-      h("p", { class: "tile-value" }, signed(r3)),
-      h("p", { class: "tile-sub" }, `${mRange(c - 2, c)} · a pace of ${signed(pace).replace(" t", " t a year")}`),
-      h("p", { class: "trend-word" }, h("span", { class: "icon", "aria-hidden": "true" }, word.icon), word.text),
-      h("p", { class: "tile-sub" }, `compared with the 12-month total of ${signed(r12)}`)),
-    h("div", { class: "tile" },
-      h("p", { class: "tile-label" }, "Who is buying"),
-      h("p", { class: "tile-value" }, pct(share)),
-      h("p", { class: "tile-sub" }, `of gross reported buying came from ${top2.map((x) => x.d.name).join(" and ")}`),
-      h("div", { class: "meter", role: "img", "aria-label": `${pct(share)} share` }, h("span", { style: `width:${(share * 100).toFixed(1)}%` })),
-      h("ul", { class: "mini-list" }, buyers.slice(0, 4).map((x) => h("li", {},
-        h("span", { class: "n" }, x.d.name), h("span", { class: "v" }, signed(x.v)))))),
+function renderTicker(m, r) {
+  const k = headline(m);
+  const dot = () => h("span", { class: "sep", "aria-hidden": "true" }, "·");
+  const parts = [
+    h("span", {}, "Reported net buying ", h("strong", {}, signed(k.r12)), ` in the 12 months to ${mLabel(k.c)} `,
+      delta(k.r12 - k.prev12, signed(k.r12 - k.prev12)), " vs prior"),
+  ];
+  if (r && r.worldSeries.length) {
+    const { now } = shareYearAgo(r);
+    parts.push(dot(), h("span", {}, "Gold ", h("strong", {}, pct1(now.v)), " of reserves"));
+    if (now.price) parts.push(dot(), h("span", {}, h("strong", {}, usd(now.price)), `/oz (${mLabel(now.i)})`));
+  }
+  parts.push(dot(), h("span", {}, `Newest IMF month ${mLabel(m.newest)}`));
+  put("ticker", parts);
+}
+
+function renderHero(m) {
+  const k = headline(m);
+  const d = k.r12 - k.prev12;
+  put("hero",
+    h("div", {},
+      h("p", { class: "hero-label" }, "Net reported buying · last 12 months"),
+      h("p", { class: "hero-value" }, signed(k.r12)),
+      h("p", { class: "hero-asof" }, `As of ${mLabel(k.c)} · ${m.holders.length} holders · IMF IRFCL`),
+      h("p", { class: "hero-sub" }, `${mRange(k.c - 11, k.c)} · prior 12 months ${signed(k.prev12)} · newest IMF month ${mLabel(m.newest)}`)),
+    h("div", { class: "hero-aside" },
+      h("span", { class: `pill ${d >= 0 ? "up" : "down"}` }, `${d >= 0 ? "▲" : "▼"} ${signed(d)}`, h("span", { class: "vs" }, "vs prior 12 months")),
+      sparkline(m.rolling12.slice(-60).map((p) => p.v), 260, 64, k.r12 >= 0 ? "up" : "down")));
+}
+
+function stat(label, value, subs = [], cls = null) {
+  return h("div", { class: "stat" },
+    h("p", { class: "stat-label" }, label),
+    h("p", { class: `stat-value${cls ? ` ${cls}` : ""}` }, value),
+    ...subs.filter(Boolean).map((x) => h("p", { class: "stat-sub" }, x)));
+}
+const group = (title, ...stats) => h("div", { class: "stat-group" }, h("h3", { class: "stat-group-title" }, title), ...stats.filter(Boolean));
+
+function renderStatGroups(m, r, log) {
+  const k = headline(m);
+  const word = trendWord(k.r12, k.pace);
+  const last = m.months.get(k.c);
+  const netMonths = [];
+  for (let i = k.c - 11; i <= k.c; i++) netMonths.push(m.months.get(i).net);
+  const buyingMonths = netMonths.filter((v) => v > 0.05).length;
+  const regular = m.holders.filter((d) => !d.stale && d.buys12 >= 3).length;
+  const groups = [
+    group("Pace",
+      stat("Last 3 months", signed(k.r3), [mRange(k.c - 2, k.c), delta(k.pace - k.r12, `${word.text} · ${signed(k.pace)} a year`, Math.max(0.15 * Math.abs(k.r12), 20))], tone(k.r3)),
+      stat(`${mLabel(k.c)}`, signed(last.net), [`Biggest: ${last.contrib.slice(0, 2).map(({ d, c }) => `${d.name} ${signed(c)}`).join(", ")}`], tone(last.net)),
+      stat("Months of net buying", `${buyingMonths} of 12`, [`Net selling in ${12 - buyingMonths}`])),
+    group("Who",
+      stat("Top two share", pct(k.share), [`of gross reported buying: ${k.top2.map((x) => x.d.name).join(" and ")}`,
+        h("div", { class: "meter", role: "img", "aria-label": `${pct(k.share)} share` }, h("span", { style: `width:${(k.share * 100).toFixed(1)}%` }))]),
+      k.buyers[0] ? stat("Top buyer", k.buyers[0].d.name, [h("span", {}, sv(k.buyers[0].v), " over 12 months")]) : null,
+      k.sellers[0] ? stat("Biggest seller", k.sellers[0].d.name, [h("span", {}, sv(k.sellers[0].v), " over 12 months")]) : null,
+      stat("Regular buyers", String(regular), ["bought in 3+ of their last 12 months"])),
   ];
   if (r && r.worldSeries.length) {
     const { now, then } = shareYearAgo(r);
-    tiles.push(h("div", { class: "tile" },
-      h("p", { class: "tile-label" }, "Gold share of reserves"),
-      h("p", { class: "tile-value" }, pct1(now.v)),
-      h("p", { class: "tile-sub" }, `of reported official reserves, at the market price, ${mLabel(now.i)}`),
-      then ? h("p", { class: "tile-delta" }, h("strong", {}, `${now.v >= then.v ? "▲" : "▼"} ${pts(now.v - then.v)}`), ` from ${pct1(then.v)} a year earlier`) : null,
-      then && then.price ? h("p", { class: "tile-sub" }, `The gold price moved ${now.price >= then.price ? "+" : MINUS}${pct(Math.abs(now.price / then.price - 1))} over the same 12 months.`) : null));
+    groups.push(group("Reserves",
+      stat("Gold share of reserves", pct1(now.v), [mLabel(now.i), then ? delta(now.v - then.v, `${pts(now.v - then.v)} y/y`, 0.0005) : null]),
+      now.price ? stat("Implied gold price", `${usd(now.price)}/oz`, ["median across reporting holders",
+        then?.price ? delta(now.price / then.price - 1, `${pct(Math.abs(now.price / then.price - 1))} y/y`, 0.005) : null]) : null,
+      stat("Gold at market value", usdMn(now.gold), [`of ${usdMn(now.total)} reported reserves`])));
   }
-  $("tiles").replaceChildren(...tiles);
+  const pending = [];
+  for (let i = m.complete + 1; i <= m.newest; i++) pending.push(`${MONTH_ONLY.format(asDate(i))} ${pct(m.months.get(i).coverage)}`);
+  const runs = log || [];
+  const passed = runs.filter((x) => x.result === "pass").length;
+  const lastRun = runs.at(-1);
+  groups.push(group("Data",
+    stat("Totals complete through", mLabel(m.complete), [pending.length ? `Still reporting: ${pending.join(", ")}` : "All months reported"]),
+    runs.length ? stat("Daily checks", `${passed} of ${runs.length} passed`, [`Last: ${lastRun.run_at_utc.replace("T", " ").replace("Z", " UTC")}, ${lastRun.result}`], passed === runs.length ? "pos" : "neg") : null,
+    stat("Holders", String(m.holders.length), [`${m.holders.filter((d) => d.stale).length} stale · newest month ${mLabel(m.newest)}`])));
+  put("stat-groups", groups);
 }
 
-function renderRolling(m) {
-  const pts12 = m.rolling12;
+function renderRolling(m, years = 0) {
+  const all = m.rolling12;
+  const pts12 = years ? all.filter((p) => p.i > all.at(-1).i - years * 12) : all;
   lineChart($("chart-rolling"), {
     points: pts12,
     label: `Line chart of 12-month net reported central bank gold buying, ${mLabel(pts12[0].i)} to ${mLabel(pts12.at(-1).i)}. Latest ${signed(pts12.at(-1).v)}.`,
@@ -781,11 +831,41 @@ function renderRolling(m) {
       { value: signed(m.months.get(p.i).net), label: "that month" },
     ],
   });
-  $("marks-key").replaceChildren(...m.marks.map((mk) => h("li", {}, h("span", { class: "n", "aria-hidden": "true" }, String(mk.n)), h("span", {}, mk.text))));
-  const yearly = pts12.filter((p) => p.i % 12 === 11 || p.i === pts12.at(-1).i).reverse();
+  const shown = m.marks.filter((mk) => mk.i >= pts12[0].i);
+  put("marks-key", shown.map((mk) => h("li", {}, h("span", { class: "n", "aria-hidden": "true" }, String(mk.n)), h("span", {}, mk.text))));
+  const yearly = all.filter((p) => p.i % 12 === 11 || p.i === all.at(-1).i).reverse();
   $("table-rolling").replaceChildren(tableDetails("Show as a table",
     table("12-month net reported buying, at each December and the latest month", ["Month", "12-month net"],
-      yearly.map((p) => [mLabel(p.i), signed(p.v)]), { scroll: true })));
+      yearly.map((p) => [mLabel(p.i), sv(p.v)]), { scroll: true })));
+}
+
+function wireTrendRange(m) {
+  const box = $("trend-range");
+  box.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    for (const x of box.querySelectorAll("button")) x.setAttribute("aria-pressed", String(x === b));
+    renderRolling(m, Number(b.dataset.years));
+  });
+}
+
+// Highlight the header tab of the section in view, and keep it visible in the scrolling tab row.
+function scrollSpy() {
+  const nav = document.querySelector(".tabs");
+  const links = [...nav.querySelectorAll("a")];
+  const byId = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const a = byId.get(e.target.id);
+      if (!a) continue;
+      for (const x of links) x.removeAttribute("aria-current");
+      a.setAttribute("aria-current", "true");
+      // offsetLeft is measured from the sticky header, so subtract the tab row's own offset.
+      nav.scrollTo({ left: a.offsetLeft - nav.offsetLeft - nav.clientWidth / 2 + a.clientWidth / 2, behavior: "auto" });
+    }
+  }, { rootMargin: "-80px 0px -65% 0px" });
+  for (const id of byId.keys()) { const sec = $(id); if (sec) io.observe(sec); }
 }
 
 function yearTitle(y) { return y.partial ? `${y.i} (${mRange(y.a, y.b)}, so far)` : String(y.i); }
@@ -815,7 +895,7 @@ function renderYears(m) {
   });
   $("table-years").replaceChildren(tableDetails("Show as a table",
     table("Net reported change per year, with the biggest buyers and sellers", ["Year", "Net change", "Biggest buyers", "Biggest sellers"],
-      ys.slice().reverse().map((y) => [yearTitle(y), signed(y.v),
+      ys.slice().reverse().map((y) => [yearTitle(y), sv(y.v),
         y.per.filter((x) => x.v > 0).slice(0, 3).map((x) => `${x.d.name} ${signed(x.v)}`).join(", ") || "–",
         y.per.filter((x) => x.v < 0).slice(-3).reverse().map((x) => `${x.d.name} ${signed(x.v)}`).join(", ") || "–"]),
       { scroll: true })));
@@ -846,7 +926,7 @@ function renderMonthly(m) {
   });
   $("table-monthly").replaceChildren(tableDetails("Show as a table",
     table("Monthly net reported change and the biggest movers", ["Month", "Net change", "Status", "Biggest moves"],
-      bars.slice().reverse().map((b) => [mLabel(b.i), signed(b.v), b.faded ? `${pct(b.mo.coverage)} reported` : "complete",
+      bars.slice().reverse().map((b) => [mLabel(b.i), sv(b.v), b.faded ? `${pct(b.mo.coverage)} reported` : "complete",
         b.mo.contrib.slice(0, 3).map(({ d, c }) => `${d.name} ${signed(c)}`).join(", ")]), { scroll: true })));
 }
 
@@ -867,7 +947,7 @@ function renderWho(m) {
   });
   $("table-who").replaceChildren(tableDetails("Show all holders as a table",
     table(`Change in reported holdings, ${mRange(m.win.from, m.win.to)}`, ["Holder", "12-month change", "Held now", "As of"],
-      sorted.filter((x) => Math.abs(x.v) >= 0.05).map((x) => [x.d.name, signed(x.v), tonnes(x.d.latest), mLabel(x.d.last)]),
+      sorted.filter((x) => Math.abs(x.v) >= 0.05).map((x) => [x.d.name, sv(x.v), tonnes(x.d.latest), mLabel(x.d.last)]),
       { scroll: true })));
 }
 
@@ -882,7 +962,7 @@ function renderGroups(m) {
   const decs = series[0].points.map((p, k) => ({ p, k })).filter(({ p }) => p.i % 12 === 11 || p.i === series[0].points.at(-1).i).reverse();
   $("table-groups").replaceChildren(tableDetails("Show as a table",
     table("12-month net reported buying by group, at each December and the latest month", ["Month", ...series.map((sr) => sr.name)],
-      decs.map(({ p, k }) => [mLabel(p.i), ...series.map((sr) => signed(sr.points[k].v))]), { scroll: true })));
+      decs.map(({ p, k }) => [mLabel(p.i), ...series.map((sr) => sv(sr.points[k].v))]), { scroll: true })));
 
   const rows = [...m.regions.entries()].map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v);
   const topIn = (region) => m.byCountry.filter((x) => (REGION_OF[x.d.code] || "Other") === region).sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 3);
@@ -913,7 +993,7 @@ function renderMomentum(m, select) {
   $("momentum-table").replaceChildren(table(`Regular buyers: purchases in at least 3 of their last 12 reported months (${regular.length} holders)`,
     ["Holder", "Buying months", "Selling months", "Current streak", "12-month change", "Last purchase"],
     regular.map((d) => [nameBtn(d), `${d.buys12} of 12`, String(d.sells12), d.streak ? plural(d.streak, "month") : "–",
-      d.d12 === undefined ? "–" : signed(d.d12), d.lastBuy === undefined ? "–" : mLabel(d.lastBuy)]), { scroll: true }));
+      d.d12 === undefined ? "–" : sv(d.d12), d.lastBuy === undefined ? "–" : mLabel(d.lastBuy)]), { scroll: true }));
 }
 
 function renderShare(m, r) {
@@ -988,9 +1068,9 @@ function renderBoard(m, r, select) {
         h("button", { type: "button", class: "holder-btn", onclick: () => select(d.code, true) }, d.name)),
       h("td", {}, tonnes(d.latest)),
       h("td", {}, pct(d.latest / total)),
-      h("td", { class: d.last < m.newest - 2 ? "flag" : "muted" }, mLabel(d.last)),
-      h("td", {}, d.d1 === undefined ? "–" : signed(d.d1)),
-      h("td", {}, d.d12 === undefined ? "–" : signed(d.d12)),
+      h("td", { class: d.last < m.newest - 2 ? "flag" : "muted" }, d.last < m.newest - 2 ? h("span", { class: "tag", title: "Reports later than most" }, "lag") : null, " ", mLabel(d.last)),
+      h("td", {}, d.d1 === undefined ? "–" : sv(d.d1)),
+      h("td", {}, d.d12 === undefined ? "–" : sv(d.d12)),
       r ? h("td", {}, rx ? pct(rx.latest.share) : "–") : null,
       h("td", {}, spark.length > 1 ? sparkline(spark) : "–"));
   });
@@ -1001,7 +1081,8 @@ function renderBoard(m, r, select) {
       h("tbody", {}, rows))));
 }
 
-function stat(label, value, note) {
+// One <dt>/<dd> pair in the holder view's stats grid.
+function dstat(label, value, note) {
   return h("div", {}, h("dt", {}, label), h("dd", {}, value, note ? h("small", {}, note) : null));
 }
 
@@ -1013,14 +1094,14 @@ function renderCountry(m, r, code) {
   const world = m.worldTotal.get(d.last) || 0;
   const rx = r?.byCode.get(code);
   put("country-stats",
-    stat("Holds", tonnes(d.latest), `${mLabel(d.last)}${d.stale ? ", no report since" : ""}`),
-    stat("Rank", `${rank} of ${m.holders.length}`, world ? `${pct1(d.latest / world)} of all reported gold` : null),
-    stat("12-month change", d.d12 === undefined ? "–" : signed(d.d12), `${d.buys12} buying, ${d.sells12} selling months`),
-    stat("Buying streak", d.streak ? plural(d.streak, "month") : "None now", d.lastBuy !== undefined ? `last purchase ${mLabel(d.lastBuy)}` : "no purchase on record"),
-    stat("Biggest month in", d.maxBuy && d.maxBuy.c > 0 ? signed(d.maxBuy.c) : "–", d.maxBuy && d.maxBuy.c > 0 ? mLabel(d.maxBuy.i) : null),
-    stat("Biggest month out", d.maxSell && d.maxSell.c < 0 ? signed(d.maxSell.c) : "–", d.maxSell && d.maxSell.c < 0 ? mLabel(d.maxSell.i) : null),
-    stat("Peak", tonnes(d.peak.v), mLabel(d.peak.i)),
-    rx ? stat("Gold share of reserves", pct1(rx.latest.share), `${mLabel(rx.last)}${rx.revalued ? ", revalued at market" : ""}`) : null,
+    dstat("Holds", tonnes(d.latest), `${mLabel(d.last)}${d.stale ? ", no report since" : ""}`),
+    dstat("Rank", `${rank} of ${m.holders.length}`, world ? `${pct1(d.latest / world)} of all reported gold` : null),
+    dstat("12-month change", d.d12 === undefined ? "–" : sv(d.d12), `${d.buys12} buying, ${d.sells12} selling months`),
+    dstat("Buying streak", d.streak ? plural(d.streak, "month") : "None now", d.lastBuy !== undefined ? `last purchase ${mLabel(d.lastBuy)}` : "no purchase on record"),
+    dstat("Biggest month in", d.maxBuy && d.maxBuy.c > 0 ? signed(d.maxBuy.c) : "–", d.maxBuy && d.maxBuy.c > 0 ? mLabel(d.maxBuy.i) : null),
+    dstat("Biggest month out", d.maxSell && d.maxSell.c < 0 ? signed(d.maxSell.c) : "–", d.maxSell && d.maxSell.c < 0 ? mLabel(d.maxSell.i) : null),
+    dstat("Peak", tonnes(d.peak.v), mLabel(d.peak.i)),
+    rx ? dstat("Gold share of reserves", pct1(rx.latest.share), `${mLabel(rx.last)}${rx.revalued ? ", revalued at market" : ""}`) : null,
   );
 
   const pts0 = [...d.s.entries()].sort((a, b) => a[0] - b[0]).map(([i, v]) => ({ i, v }));
@@ -1079,7 +1160,7 @@ function renderCountry(m, r, code) {
       pts0.slice().reverse().map((p) => {
         const c = m.change(d, p.i);
         const e = rx?.s.get(p.i);
-        return [mLabel(p.i), tonnes(p.v), c === undefined ? "–" : signed(c), ...(rx ? [e ? pct1(e.share) : "–"] : [])];
+        return [mLabel(p.i), tonnes(p.v), c === undefined ? "–" : sv(c), ...(rx ? [e ? pct1(e.share) : "–"] : [])];
       }), { scroll: true })));
 }
 
@@ -1128,21 +1209,33 @@ async function getJSON(url) {
   return res.json();
 }
 
+// data/fetch_log.csv -> [{run_at_utc, result, ...}]; the daily job's own record of its runs.
+async function getLog(url) {
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const [head, ...rows] = (await res.text()).trim().split(/\r?\n/);
+  const keys = head.split(",");
+  return rows.filter(Boolean).map((line) => Object.fromEntries(line.split(",").map((v, k) => [keys[k], v])));
+}
+
 async function main() {
-  let raw, rr = null;
+  let raw, rr = null, log = null;
   try {
-    [raw, rr] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null)]);
+    [raw, rr, log] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null), getLog("data/fetch_log.csv").catch(() => null)]);
   } catch (err) {
-    const f = $("freshness");
+    const f = $("ticker");
     f.textContent = `Couldn't load ${DATA_URL} (${err.message}). If you opened this file directly, serve the folder over HTTP instead.`;
     f.classList.add("error");
     return;
   }
   const m = buildModel(raw);
   const r = buildReserves(rr, m);
+  renderTicker(m, r);
+  renderHero(m);
+  renderStatGroups(m, r, log);
   renderFreshness(m);
-  renderGauge(m, r);
   renderRolling(m);
+  wireTrendRange(m);
   renderYears(m);
   renderMonthly(m);
   renderWho(m);
@@ -1165,6 +1258,7 @@ async function main() {
   const topBuyer = m.byCountry.slice().sort((a, b) => b.v - a.v)[0];
   select(topBuyer ? topBuyer.d.code : "USA", false);
   renderNotes(m, r);
+  scrollSpy();
 }
 
 main();
