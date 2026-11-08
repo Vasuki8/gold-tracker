@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Central Bank Gold Tracker</title>
-  <meta name="description" content="Reported central bank gold holdings from the IMF, updated daily: who is buying, and is the pace rising or falling.">
+  <meta name="description" content="Reported central bank gold holdings from the IMF, updated daily: who is buying, how fast, and how much of the world's reserves are now gold.">
   <link rel="stylesheet" href="assets/style.css">
   <script src="assets/app.js" defer></script>
 </head>
@@ -14,65 +14,134 @@
     <header class="page-head">
       <p class="eyebrow">Personal tracker · IMF IRFCL data, checked daily</p>
       <h1>Central bank gold</h1>
-      <p class="lede">Reported official gold holdings. A slow macro gauge: are central banks adding gold, who is doing it, and is the pace rising or falling?</p>
+      <p class="lede">Reported official gold holdings. A slow macro gauge: are central banks adding gold, who is doing it, is the pace rising or falling, and how much of their reserves is now gold?</p>
       <p class="freshness" id="freshness" role="status">Loading data…</p>
-      <noscript><p class="freshness">This page needs JavaScript to draw its charts. The data itself is in <a href="data/gold_tonnes.json">data/gold_tonnes.json</a>.</p></noscript>
+      <noscript><p class="freshness">This page needs JavaScript to draw its charts. The data itself is in <a href="data/gold_tonnes.json">data/gold_tonnes.json</a> and <a href="data/reserves_usd.json">data/reserves_usd.json</a>.</p></noscript>
+      <nav class="toc" aria-label="Sections">
+        <a href="#gauge">Gauge</a>
+        <a href="#trend">Trend</a>
+        <a href="#years">Years</a>
+        <a href="#months">Months</a>
+        <a href="#who">Who</a>
+        <a href="#groups">Groups</a>
+        <a href="#momentum">Momentum</a>
+        <a href="#reserves">Share of reserves</a>
+        <a href="#board">Largest holders</a>
+        <a href="#country">One holder</a>
+        <a href="#method">Method</a>
+      </nav>
     </header>
 
     <main>
-      <section class="card" aria-labelledby="gauge-h">
+      <section class="card" id="gauge" aria-labelledby="gauge-h">
         <h2 id="gauge-h">The gauge</h2>
         <p class="sub" id="gauge-sub"></p>
         <div class="tiles" id="tiles"></div>
         <p class="caveat">Reported holdings only. The World Gold Council estimates that most central bank buying is not disclosed by country (about 63% of activity in Q3 2026), so the real total is larger than this. Read these numbers for direction and pace, not the full amount.</p>
       </section>
 
-      <section class="card" aria-labelledby="trend-h">
+      <section class="card" id="trend" aria-labelledby="trend-h">
         <h2 id="trend-h">Net buying over the past 12 months</h2>
-        <p class="sub">Sum of all reported changes in the 12 months up to each point. Above zero: central banks were adding gold overall.</p>
+        <p class="sub">Sum of all reported changes in the 12 months up to each point. Above zero: central banks were adding gold overall. Numbered markers are explained below the chart.</p>
         <div class="chart" id="chart-rolling"></div>
+        <ol class="marks-key" id="marks-key"></ol>
         <div id="table-rolling"></div>
       </section>
 
-      <section class="card" aria-labelledby="monthly-h">
+      <section class="card" id="years" aria-labelledby="years-h">
+        <h2 id="years-h">Year by year</h2>
+        <p class="sub" id="years-sub"></p>
+        <div class="chart" id="chart-years"></div>
+        <p class="chart-note" id="years-note"></p>
+        <div id="table-years"></div>
+      </section>
+
+      <section class="card" id="months" aria-labelledby="monthly-h">
         <h2 id="monthly-h">Month by month</h2>
         <p class="sub" id="monthly-sub">Net reported change each month, all holders together.</p>
         <div class="chart" id="chart-monthly"></div>
         <div id="table-monthly"></div>
       </section>
 
-      <section class="card" aria-labelledby="who-h">
+      <section class="card" id="who" aria-labelledby="who-h">
         <h2 id="who-h">Who is buying and selling</h2>
         <p class="sub" id="who-sub"></p>
         <div class="chart" id="chart-who"></div>
         <div id="table-who"></div>
       </section>
 
-      <section class="card" aria-labelledby="board-h">
-        <h2 id="board-h">Largest holders</h2>
-        <p class="sub" id="board-sub"></p>
-        <div id="board"></div>
+      <section class="card" id="groups" aria-labelledby="groups-h">
+        <h2 id="groups-h">Emerging and advanced economies</h2>
+        <p class="sub">12-month net reported buying by group. Advanced economies sold through the 2000s; since then the buying has come from emerging and developing economies.</p>
+        <div class="legend" id="groups-legend"></div>
+        <div class="chart" id="chart-groups"></div>
+        <div id="table-groups"></div>
+        <h3 class="h3" id="regions-h">By region, last 12 months</h3>
+        <p class="sub" id="regions-sub"></p>
+        <div class="chart" id="chart-regions"></div>
       </section>
 
-      <section class="card" aria-labelledby="country-h" id="country">
-        <h2 id="country-h">One holder over time</h2>
+      <section class="card" id="momentum" aria-labelledby="momentum-h">
+        <h2 id="momentum-h">Momentum</h2>
+        <p class="sub" id="momentum-sub"></p>
+        <div class="split" id="momentum-lists"></div>
+        <div id="momentum-table"></div>
+      </section>
+
+      <section class="card" id="reserves" aria-labelledby="reserves-h">
+        <h2 id="reserves-h">Gold as a share of reserves</h2>
+        <p class="sub" id="reserves-sub"></p>
+        <div class="chart" id="chart-share"></div>
+        <div id="table-share"></div>
+        <div class="split charts">
+          <div>
+            <h3 class="h3">Largest holders: gold as % of their reserves</h3>
+            <div class="chart" id="chart-share-holders"></div>
+          </div>
+          <div>
+            <h3 class="h3">Gold price implied by the IMF data</h3>
+            <p class="sub small">Median US dollars per ounce across all reporting holders. It tracks the market price.</p>
+            <div class="chart" id="chart-price"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="board" aria-labelledby="board-h">
+        <h2 id="board-h">Largest holders</h2>
+        <p class="sub" id="board-sub"></p>
+        <div id="board-table"></div>
+      </section>
+
+      <section class="card" id="country" aria-labelledby="country-h">
+        <h2 id="country-h">One holder in depth</h2>
         <div class="controls">
           <label for="country-select">Holder</label>
           <select id="country-select"></select>
         </div>
-        <p class="sub" id="country-sub"></p>
+        <dl class="stats" id="country-stats"></dl>
+        <h3 class="h3">Reported holdings</h3>
         <div class="chart" id="chart-country"></div>
+        <div class="split charts">
+          <div>
+            <h3 class="h3">Change by year</h3>
+            <div class="chart" id="chart-country-years"></div>
+          </div>
+          <div>
+            <h3 class="h3" id="country-share-h">Gold as % of its reserves</h3>
+            <div class="chart" id="chart-country-share"></div>
+          </div>
+        </div>
         <div id="table-country"></div>
       </section>
 
-      <section class="card notes" aria-labelledby="notes-h">
+      <section class="card notes" id="method" aria-labelledby="notes-h">
         <h2 id="notes-h">How the numbers are made</h2>
         <div id="notes"></div>
       </section>
     </main>
 
     <footer class="page-foot">
-      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL), line 56, gold volume, monetary authorities plus central government. Fetched daily by a GitHub Actions job (<a href="spike/fetch_irfcl.py">script</a>, <a href="data/fetch_log.csv">run log</a>, <a href="data/gold_tonnes.json">data</a>). A personal project, not investment advice.</p>
+      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>). A personal project, not investment advice.</p>
     </footer>
   </div>
 </body>

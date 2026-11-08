@@ -1,7 +1,8 @@
-# Daily fetch of IMF IRFCL gold reserves (the two-week reliability test, then the v1 data feed).
-# Every run appends a row to data/fetch_log.csv. data/gold_tonnes.json is committed only when
-# the run passed and the IMF data actually changed. A failed run fails the job, so GitHub
-# emails the repo owner.
+# Daily fetch of IMF IRFCL data: gold volumes (the two-week reliability test, then the v1 data
+# feed) and, as a separate step with its own log, reserves in US dollars (gold's share of
+# reserves). Every run appends a row to each log. Each data file is committed only when its own
+# step passed and the IMF data actually changed. A failed step fails the job, so GitHub emails
+# the repo owner.
 name: Fetch IMF gold reserves
 
 on:
@@ -28,39 +29,56 @@ jobs:
         continue-on-error: true
         run: python3 spike/fetch_irfcl.py --out data --log data/fetch_log.csv
 
-      - name: Keep the raw IMF response for 30 days
+      - name: Fetch reserves in US dollars (gold share of reserves)
+        id: reserves
+        continue-on-error: true
+        run: python3 spike/fetch_reserves.py --out data --log data/fetch_log_reserves.csv
+
+      - name: Keep the raw IMF responses for 30 days
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: irfcl-raw-${{ github.run_id }}
-          path: data/irfcl_gold_raw.csv
+          path: |
+            data/irfcl_gold_raw.csv
+            data/irfcl_reserves_raw.csv
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Commit the log row, and the data if it changed
+      - name: Commit the log rows, and the data if it changed
         env:
           FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          RESERVES_OUTCOME: ${{ steps.reserves.outcome }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ "$FETCH_OUTCOME" != "success" ]; then
-            # Never commit data from a failed run; keep only the log row.
-            git restore data/gold_tonnes.json 2>/dev/null || rm -f data/gold_tonnes.json
-          fi
+          # Never commit data from a failed step; its log row still goes in.
+          keep_or_drop() {
+            if [ "$1" != "success" ]; then git restore "$2" 2>/dev/null || rm -f "$2"; fi
+            if [ -f "$2" ]; then git add "$2"; fi
+          }
+          keep_or_drop "$FETCH_OUTCOME" data/gold_tonnes.json
+          keep_or_drop "$RESERVES_OUTCOME" data/reserves_usd.json
           git add data/fetch_log.csv
-          if [ -f data/gold_tonnes.json ]; then git add data/gold_tonnes.json; fi
-          if git diff --cached --quiet -- data/gold_tonnes.json; then
-            msg="Fetch log: $FETCH_OUTCOME"
-          else
+          if [ -f data/fetch_log_reserves.csv ]; then git add data/fetch_log_reserves.csv; fi
+          changed=""
+          git diff --cached --quiet -- data/gold_tonnes.json || changed="gold"
+          git diff --cached --quiet -- data/reserves_usd.json || changed="${changed:+$changed + }reserves"
+          if [ -n "$changed" ]; then
             newest=$(tail -n 1 data/fetch_log.csv | cut -d, -f8)
-            msg="IMF gold data update (newest month $newest)"
+            msg="IMF data update: $changed (newest gold month $newest)"
+          else
+            msg="Fetch log: gold $FETCH_OUTCOME, reserves $RESERVES_OUTCOME"
           fi
           git diff --cached --quiet || git commit -m "$msg"
           git pull --rebase --quiet origin "$GITHUB_REF_NAME"
           git push origin "HEAD:$GITHUB_REF_NAME"
 
-      - name: Fail the run if the fetch failed
-        if: steps.fetch.outcome != 'success'
+      - name: Fail the run if a fetch failed
+        if: steps.fetch.outcome != 'success' || steps.reserves.outcome != 'success'
+        env:
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          RESERVES_OUTCOME: ${{ steps.reserves.outcome }}
         run: |
-          echo "::error::IRFCL fetch or checks failed. See the 'Fetch and clean' step log."
+          echo "::error::Gold volumes: $FETCH_OUTCOME. Reserves: $RESERVES_OUTCOME. See the fetch step logs."
           exit 1

@@ -1,8 +1,9 @@
 # Spike scratch output (the daily job writes to data/ instead)
 spike/out/
 
-# Raw IMF response: 2.8 MB, kept as a 30-day workflow artifact, not in git
+# Raw IMF responses (2.8 MB and 5.1 MB), kept as 30-day workflow artifacts, not in git
 data/irfcl_gold_raw.csv
+data/irfcl_reserves_raw.csv
 
 # Local Claude Code config (dev server launcher, local settings)
 .claude/
