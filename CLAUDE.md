@@ -5,10 +5,11 @@
 - Commits by the workflow's `GITHUB_TOKEN` do trigger the Pages rebuild, so new data reaches the live page without extra steps.
 
 ## Layout
-- `spike/fetch_irfcl.py`: fetch + clean, standard library only. `--out DIR` (the workflow uses `data/`), `--log FILE` (one CSV row per run).
-- `.github/workflows/fetch-irfcl.yml`: daily at 06:23 UTC plus manual runs. Appends to `data/fetch_log.csv` every run (the reliability record); commits `data/gold_tonnes.json` only when the run passed and the data changed; keeps the raw IMF CSV as a 30-day artifact; a failed run fails the job so GitHub emails the owner.
-- `data/gold_tonnes.json`: committed data, no timestamp inside, so git history shows only real IMF revisions. Seeded from the 2026-11-08 response.
-- `index.html`, `assets/app.js`, `assets/style.css`: the page. Plain JS drawing SVG, no build step, no libraries. Served from the repo root by GitHub Pages (`.nojekyll` skips Jekyll). Local preview: `python -m http.server 8765` in the repo root (opening the file directly can't load the JSON).
+- `spike/fetch_irfcl.py`: gold volumes, fetch + clean, standard library only. `--out DIR` (the workflow uses `data/`), `--log FILE` (one CSV row per run).
+- `spike/fetch_reserves.py` (added 2026-11-08): total official reserve assets (`IRFCLDT1_IRFCL65_USD`) and gold value (`IRFCLDT1_IRFCL56_USD`) in US dollars, one request (`+` joins the two indicators; `,` gets HTTP 403). Imports helpers from `fetch_irfcl.py`, same cleaning rules, needs `gold_tonnes.json` to derive the price. Separate script with its own log so the gold-volume request under the reliability test is unchanged.
+- `.github/workflows/fetch-irfcl.yml`: daily at 06:23 UTC plus manual runs. Two fetch steps; each appends to its own log (`data/fetch_log.csv`, `data/fetch_log_reserves.csv`); each data file is committed only when its own step passed and the data changed; raw IMF CSVs kept as 30-day artifacts; any failed step fails the job so GitHub emails the owner.
+- `data/gold_tonnes.json`, `data/reserves_usd.json`: committed data, no timestamps inside, so git history shows only real IMF revisions. The reserves file is one observation per line for readable diffs. The runner's output matched a local run byte for byte (Python 3.12 vs 3.14).
+- `index.html`, `assets/app.js`, `assets/style.css`: the page. Plain JS drawing SVG, no build step, no libraries. Served from the repo root by GitHub Pages (`.nojekyll` skips Jekyll). Local preview: `python -m http.server 8765` in the repo root (opening the file directly can't load the JSON). The page still works if `reserves_usd.json` is missing (the reserves section and column hide).
 
 ## What it is
 A personal project (the owner is the only user) that tracks gold accumulation and selling by central banks and large institutions. No audience, no monetization, no need to differentiate from existing sites (WGC Goldhub, Trading Economics).
@@ -38,10 +39,13 @@ Central bank gold trades are private, so individual transactions can't be seen. 
 - **v1 page layout (confirmed by the owner 2026-11-08):** headline numbers first, because the tracker is one slow macro input: (1) reported net central bank buying, rolling 3 and 12 months, and whether it is speeding up or slowing; (2) who is buying (concentration: Poland and China lead in 2026); then the 12-month trend since 2000, monthly bars, buyers and sellers, the top-15 holders table, and one chart per holder. Still to do: (3) an alert when the direction flips. v2 daily ETF data drops in priority under the working assumption in Purpose.
 - **v1 coverage (settled 2026-11-08):** top 15 holders *that report to IRFCL* (includes the ECB), Uzbekistan noted as missing. No second source.
 - **Hosting (owner, 2026-11-08):** public GitHub repo + GitHub Pages.
+- **Depth added (owner asked, 2026-11-08):** year-by-year totals with top buyers/sellers and context markers on the trend; emerging vs advanced economies and regions; momentum (streaks, started/stopped, regular buyers); gold as a share of reserves (world line, largest holders, implied price); one holder in depth (rank, streak, biggest months, yearly changes, gold share of its reserves). Page order: gauge, trend, years, months, who, groups, momentum, share of reserves, largest holders, one holder, method.
 
 ## How the page counts a month
 - A holder's change in month m = its value at m minus its previous available value, looking back up to 3 months (so a dropped error value doesn't hide the move around it).
 - Each active holder (reported within 6 months of the newest month) gets an *activity* weight: the sum of its absolute monthly changes over its own last 12 reported months. Month m enters the totals once holders with 90% of total activity have reported it. Weighting by holdings instead would let the US (26% of all gold, never changes, reports last) delay every total by months; by activity it weighs nothing, and Turkey (big swings) weighs a lot.
+- Groups: advanced = IMF WEO advanced-economy list plus the ECB; everyone else emerging/developing. Regions are the page's own grouping (Russia and Turkey in Europe; Kazakhstan and Egypt in Middle East, N. Africa, Central Asia). Momentum: a purchase is a month up at least 0.1 t; "started again" = a purchase in the last 6 reported months after none in the 12 before; "stopped" = none in the last 6 after 3+ in the 12 before.
+- Trend markers: two fixed (Sep 2019 CBGA expiry, Feb 2022 Bank of Russia reserves frozen) and two found in the data (Dec 2009, when the 12-month total turned positive for good; Nov 2022, China's first reported purchase in 38 months). The shaded band before Dec 2009 is the net-selling era.
 - First run (data of 2026-11-08): totals complete through Aug 2026 (Sep 62% reported, because Turkey hadn't filed). +320 t net in the 12 months to Aug 2026, +308 t in the 12 months before; last 3 months +159 t, about +634 t a year, so "speeding up". Poland and China are 56% of gross reported buying.
 
 ## Architecture direction
@@ -49,6 +53,12 @@ Central bank gold trades are private, so individual transactions can't be seen. 
 - Git history records each revision of the data ("git scraping"). This matters because the IMF and central banks revise figures after publishing.
 - The same scheduled job compares new data with the last commit and sends the alerts.
 - Pick one unit (tonnes) and convert on arrival; 1 tonne ≈ 32,150.75 fine troy ounces.
+
+## Gold share of reserves (findings 2026-11-08)
+- **Reported gold values can't be used as they are.** The US reports its gold at the statutory $42.22/oz ($11,041 M for 261.5 M oz; its total reserves show as $252.7 bn); Saudi Arabia, Korea and Singapore use historical cost; Chile's value is ~44x market (probably a unit error on a tiny holding). The fetch script's US tripwire checks that $11,041 M figure.
+- **The market price comes from the data itself:** the median US$/oz across holders with 1 t or more, for months with 10+ holders. It tracks the market (2000-12 $273, 2015-12 $1,062, 2024-12 $2,609, 2025-12 $4,313, 2026-02 $5,211 from 66 holders, 2026-07 $4,050). Every holder's gold is revalued at it, and the reported gold value inside total reserves is swapped for that market value. No second source needed.
+- **The world line starts Jun 2015,** when China (the largest reserve holder) first appears; before that coverage of today's reserves is ~70% and adding China would show as a fake drop. It ends at the latest month with 90% of reserves reported (Jul 2026 on 2026-11-08). A holder missing a month inside the line keeps its last non-gold reserves and tonnage for up to 3 months (an Oct 2025 gap otherwise made a fake 4-point dip).
+- Result: gold was 8.5% of reported reserves in Jul 2015, 21.2% in Jul 2025 and 24.8% in Jul 2026 (peak 29.2% in Feb 2026). The rise is mostly price: +23% in price vs +0.9% in reported tonnes over the last 12 months. Largest holders: Germany 82%, US 81%, China 9%, Poland 31% (its stated target is 30%).
 
 ## Rule of thumb
 Every data source is something that can break. Limit scope by number of sources, not features. Don't add a second source until the first one runs end to end without manual steps.
@@ -59,6 +69,7 @@ That the v1 source (IMF API or WGC download) can be fetched reliably by a script
 
 ## Next step
 1. Two-week reliability test, 2026-11-08 to about 2026-11-22: the daily job (06:23 UTC) runs about 14 times; count `fail` / `crash` rows and `tries` > 1 in `data/fetch_log.csv`. One success doesn't prove reliability: the SDMX 2.1 URL another project used recently already fails, so the IMF API is still moving. Run 1 (manual, 2026-11-08 08:44 UTC): pass, HTTP 200, 1 try, 0.8 s, 2.77 MB, and it already picked up new IMF months that had appeared since the morning's fetch.
+   The reserves fetch (added 2026-11-08, run 2 onward) has its own log, `data/fetch_log_reserves.csv`; count it separately.
 2. After the test: the direction-flip alert (v1 item 3), from the same job.
 
 ## Spike findings (2026-11-08, first live run)
