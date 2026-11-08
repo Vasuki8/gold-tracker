@@ -28,6 +28,7 @@
         <a href="#gauge">Overview</a>
         <a href="#trend">Trend</a>
         <a href="#years">Years</a>
+        <a href="#supply">Supply</a>
         <a href="#months">Months</a>
         <a href="#updates">Updates</a>
         <a href="#who">Who</a>
@@ -82,6 +83,24 @@
         <div class="chart" id="chart-years"></div>
         <p class="chart-note" id="years-note"></p>
         <div id="table-years"></div>
+      </section>
+
+      <section class="card" id="supply" aria-labelledby="supply-h">
+        <h2 id="supply-h">Against mine production</h2>
+        <p class="sub" id="supply-sub">Loading mine production from the USGS and Our World in Data…</p>
+        <dl class="stats" id="supply-stats"></dl>
+        <h3 class="h3">Reported central bank buying as a share of what is mined</h3>
+        <p class="sub small" id="supply-share-sub"></p>
+        <div class="chart" id="chart-supply-share"></div>
+        <h3 class="h3">World gold mine production</h3>
+        <p class="sub small" id="supply-world-sub"></p>
+        <div class="chart" id="chart-supply-world"></div>
+        <h3 class="h3" id="producers-h">Largest producers</h3>
+        <p class="sub small" id="producers-sub"></p>
+        <div class="chart" id="chart-producers"></div>
+        <div id="table-producers"></div>
+        <p class="chart-note" id="supply-note"></p>
+        <div id="table-supply"></div>
       </section>
 
       <section class="card" id="months" aria-labelledby="monthly-h">
@@ -236,7 +255,7 @@
     </main>
 
     <footer class="page-foot" id="foot">
-      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>, <a href="data/changes.json">changes</a>). Funds panel: <a href="https://www.spdrgoldshares.com/usa/historical-data/">SPDR Gold Shares</a> and <a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm">CFTC Commitments of Traders</a>, loaded by your browser. A personal project, not investment advice.</p>
+      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>, <a href="data/changes.json">changes</a>). Mine production: <a href="https://www.usgs.gov/centers/national-minerals-information-center/mineral-commodity-summaries">USGS Mineral Commodity Summaries</a> (<a href="spike/fetch_production.py">script</a>, <a href="data/production_usgs.json">data</a>, <a href="data/fetch_log_production.csv">log</a>) and <a href="https://ourworldindata.org/explorers/minerals">Our World in Data</a> (USGS and BGS figures, loaded by your browser). Funds panel: <a href="https://www.spdrgoldshares.com/usa/historical-data/">SPDR Gold Shares</a> and <a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm">CFTC Commitments of Traders</a>, loaded by your browser. A personal project, not investment advice.</p>
     </footer>
   </div>
 </body>

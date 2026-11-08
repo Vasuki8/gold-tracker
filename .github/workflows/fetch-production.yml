@@ -1,0 +1,56 @@
+# Monthly fetch of world gold mine production from the USGS Mineral Commodity Summaries.
+# The USGS publishes once a year (late January) and revises a few times after, so monthly is
+# plenty. Kept apart from the daily IMF job: a USGS problem can't touch the IMF pipeline or its
+# reliability count. Every run appends a row to data/fetch_log_production.csv; the data file is
+# committed only when the fetch passed and the numbers changed. A failed fetch fails the job, so
+# GitHub emails the repo owner.
+name: Fetch USGS gold mine production
+
+on:
+  schedule:
+    - cron: "41 7 3 * *" # 07:41 UTC on the 3rd of each month
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-production
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch USGS world gold mine production
+        id: fetch
+        continue-on-error: true
+        run: python3 spike/fetch_production.py --out data --log data/fetch_log_production.csv
+
+      - name: Commit the log row, and the data if it changed
+        env:
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Never commit data from a failed fetch; its log row still goes in.
+          if [ "$FETCH_OUTCOME" != "success" ]; then git restore data/production_usgs.json 2>/dev/null || rm -f data/production_usgs.json; fi
+          if [ -f data/production_usgs.json ]; then git add data/production_usgs.json; fi
+          git add data/fetch_log_production.csv
+          if git diff --cached --quiet -- data/production_usgs.json; then
+            msg="Production fetch log: $FETCH_OUTCOME"
+          else
+            msg="USGS data update: gold mine production (newest year $(tail -n 1 data/fetch_log_production.csv | cut -d, -f8))"
+          fi
+          git diff --cached --quiet || git commit -m "$msg"
+          git pull --rebase --quiet origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+
+      - name: Fail the run if the fetch failed
+        if: steps.fetch.outcome != 'success'
+        run: |
+          echo "::error::USGS production fetch: ${{ steps.fetch.outcome }}. See the step log."
+          exit 1

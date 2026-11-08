@@ -1,0 +1,25 @@
+{
+ "source": "USGS Mineral Commodity Summaries 2026, gold, world mine production (data release)",
+ "edition": 2026,
+ "item": "https://www.sciencebase.gov/catalog/item/69837e43b66b01367d7ec7c7",
+ "csv": "https://www.sciencebase.gov/catalog/file/get/69837e43b66b01367d7ec7c7?f=__disk__d3%2Fac%2F84%2Fd3ac8466552946c5e8caa2c2c6338d9e1aff655d",
+ "unit": "tonnes",
+ "note": "WLD = world total (rounded by USGS), OTH = other countries. \"est\" = estimated by USGS.",
+ "production": {
+  "WLD": [[2024, 3280], [2025, 3300, "est"]],
+  "OTH": [[2024, 1020], [2025, 1000, "est"]],
+  "AUS": [[2024, 284], [2025, 280, "est"]],
+  "BRA": [[2024, 82, "est"], [2025, 80, "est"]],
+  "CAN": [[2024, 200, "est"], [2025, 200, "est"]],
+  "CHN": [[2024, 377], [2025, 380, "est"]],
+  "GHA": [[2024, 149], [2025, 150, "est"]],
+  "IDN": [[2024, 94, "est"], [2025, 90, "est"]],
+  "KAZ": [[2024, 130, "est"], [2025, 130, "est"]],
+  "MEX": [[2024, 140], [2025, 140, "est"]],
+  "PER": [[2024, 108], [2025, 110, "est"]],
+  "RUS": [[2024, 310, "est"], [2025, 310, "est"]],
+  "USA": [[2024, 163], [2025, 160, "est"]],
+  "UZB": [[2024, 129], [2025, 130, "est"]],
+  "ZAF": [[2024, 90], [2025, 90, "est"]]
+ }
+}

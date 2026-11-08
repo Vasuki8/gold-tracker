@@ -2,11 +2,17 @@
 /* Central bank gold tracker. Reads data/gold_tonnes.json, data/reserves_usd.json and
    data/changes.json (written daily by the scripts in spike/) and draws everything client-side:
    no build step, no libraries. The Funds panel is the exception: it loads GLD and CFTC data in
-   the browser, straight from those sources (both allow it), so none of it is stored in the repo. */
+   the browser, straight from those sources (both allow it), so none of it is stored in the repo.
+   Mine production: the USGS figures are in data/production_usgs.json (written monthly by
+   spike/fetch_production.py); the history comes from Our World in Data, loaded by the browser. */
 
 const DATA_URL = "data/gold_tonnes.json";
 const RESERVES_URL = "data/reserves_usd.json";
 const CHANGES_URL = "data/changes.json";
+const PRODUCTION_URL = "data/production_usgs.json";
+// Our World in Data: gold mine production in tonnes, by country, 1900 onward (USGS plus British
+// Geological Survey figures). An indicator id: a new OWID dataset version may move it.
+const OWID_PROD = "https://api.ourworldindata.org/v1/indicators/1131111";
 const GLD_URL = "https://api.spdrgoldshares.com/api/v1/historical-archive?product=gld&exchange=NYSE&lang=en";
 const CFTC_URL = `https://publicreporting.cftc.gov/resource/72hh-3qpy.json?${new URLSearchParams({
   $select: "report_date_as_yyyy_mm_dd,open_interest_all,m_money_positions_long_all,m_money_positions_short_all,"
@@ -41,7 +47,7 @@ const NAMES = {
   ROU: "Romania", RUS: "Russia", SAU: "Saudi Arabia", SGP: "Singapore", SLV: "El Salvador", SRB: "Serbia",
   SVK: "Slovakia", SVN: "Slovenia", SWE: "Sweden", THA: "Thailand", TUN: "Tunisia", TUR: "Turkey",
   UKR: "Ukraine", URY: "Uruguay", USA: "United States", WBG: "West Bank and Gaza", ZAF: "South Africa",
-  AGO: "Angola", UZB: "Uzbekistan", G163: "Euro area",
+  AGO: "Angola", UZB: "Uzbekistan", GHA: "Ghana", G163: "Euro area",
 };
 const nameOf = (code) => NAMES[code] || code;
 
@@ -87,13 +93,14 @@ const mag = (v) => (Math.abs(v) >= 100 ? NF0 : NF1).format(Math.abs(v));
 const isZero = (v) => /^0(\.0)?$/.test(mag(v));
 const tonnes = (v) => `${v < 0 && !isZero(v) ? MINUS : ""}${mag(v)} t`;
 const signed = (v) => `${isZero(v) ? "" : v > 0 ? "+" : MINUS}${mag(v)} t`;
-const pct = (v) => `${Math.round(v * 100)}%`;
-const pct1 = (v) => `${(v * 100).toFixed(1)}%`;
+const pct = (v) => `${Math.round(v * 100) < 0 ? MINUS : ""}${Math.abs(Math.round(v * 100))}%`;
+const pct1 = (v) => `${v < 0 ? MINUS : ""}${Math.abs(v * 100).toFixed(1)}%`;
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"}`;
 const pts = (v) => `${v >= 0 ? "+" : MINUS}${Math.abs(v * 100).toFixed(1)} pts`;
 const usd = (v) => `$${NF0.format(v)}`;
 const usdMn = (mn) => (mn >= 1e6 ? `$${(mn / 1e6).toFixed(2)} tn` : mn >= 1e3 ? `$${NF0.format(mn / 1e3)} bn` : `$${NF0.format(mn)} M`);
 const tickText = (v) => `${v < 0 ? MINUS : ""}${NF0.format(Math.abs(v))}`;
-const pctTick = (v) => `${Math.round(v * 100)}%`;
+const pctTick = (v) => `${v < 0 ? MINUS : ""}${Math.abs(Math.round(v * 100))}%`;
 const usdTick = (v) => `$${NF0.format(v)}`;
 const tnTick = (mn) => (mn === 0 ? "0" : `$${(mn / 1e6).toLocaleString("en", { maximumFractionDigits: 1 })} tn`);
 const count = (v) => NF0.format(v);
@@ -408,8 +415,11 @@ function niceTicks(lo, hi, count) {
   return { lo: a, hi: b, ticks };
 }
 
-// Renders on mount and again whenever the container's width changes.
+// Renders on mount and again whenever the container's width changes. Redrawing into the same
+// container (another holder, another range) retires the previous chart's observer first, or the
+// old chart would keep redrawing itself on every resize.
 function mountChart(container, draw) {
+  container.chartObserver?.disconnect();
   container.replaceChildren();
   const tip = h("div", { class: "tt", hidden: true, "aria-hidden": "true" });
   container.append(tip);
@@ -422,7 +432,8 @@ function mountChart(container, draw) {
     tip.hidden = true;
     container.prepend(draw(w, tip));
   };
-  new ResizeObserver(() => requestAnimationFrame(render)).observe(container);
+  container.chartObserver = new ResizeObserver(() => requestAnimationFrame(render));
+  container.chartObserver.observe(container);
   render();
 }
 
@@ -504,7 +515,7 @@ function yearAxis(svg, x0, x1, X, y, centerOffset = 0) {
   for (let yr = yearOf(x0); yr <= yearOf(x1); yr++) if (yr * 12 >= x0 && yr * 12 <= x1) years.push(yr);
   if (!years.length) return;
   const perYear = Math.abs(X(12) - X(0));
-  const every = [1, 2, 5, 10].find((n) => perYear * n >= 44) || 10;
+  const every = [1, 2, 5, 10, 20, 50].find((n) => perYear * n >= 44) || 50; // 1900 onward on a phone: every 50
   for (const yr of years) {
     if (yr % every) continue;
     svg.append(s("text", { x: X(yr * 12) + centerOffset, y: y + 18, class: "tick", "text-anchor": "middle" }, String(yr)));
@@ -666,7 +677,7 @@ function multiLineChart(container, { series, label, height = 280, fmt = signed, 
   });
 }
 
-function columnChart(container, { bars, label, height = 240, tipRows, tipTitle = (b) => mLabel(b.i), axis = "months" }) {
+function columnChart(container, { bars, label, height = 240, tipRows, tipTitle = (b) => mLabel(b.i), axis = "months", fmtTick = tickText }) {
   mountChart(container, (W, tip) => {
     const M = { t: 14, r: 8, b: 30, l: 52 };
     const pw = W - M.l - M.r, ph = height - M.t - M.b;
@@ -676,7 +687,7 @@ function columnChart(container, { bars, label, height = 240, tipRows, tipTitle =
     const yt = niceTicks(Math.min(0, ...vs), Math.max(0, ...vs), 4);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
     const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
-    yGrid(svg, yt, Y, M.l, M.l + pw);
+    yGrid(svg, yt, Y, M.l, M.l + pw, fmtTick);
     const bx = (k) => M.l + band * k;
     if (axis === "years") {
       const every = [1, 2, 5, 10].find((n) => band * n >= 40) || 10;
@@ -903,7 +914,7 @@ function stat(label, value, subs = [], cls = null) {
     h("p", { class: `stat-value${cls ? ` ${cls}` : ""}` }, value),
     ...subs.filter(Boolean).map((x) => h("p", { class: "stat-sub" }, x)));
 }
-const group = (title, ...stats) => h("div", { class: "stat-group" }, h("h3", { class: "stat-group-title" }, title), ...stats.filter(Boolean));
+const group = (title, ...stats) => h("div", { class: "stat-group", "data-group": title }, h("h3", { class: "stat-group-title" }, title), ...stats.filter(Boolean));
 
 function breadthStat(m) {
   const now = m.breadth.at(-1), then = m.breadth.find((p) => p.i === now.i - 12);
@@ -1286,6 +1297,7 @@ function renderCountry(m, r, code) {
     dstat("Biggest month out", d.maxSell && d.maxSell.c < 0 ? signed(d.maxSell.c) : "–", d.maxSell && d.maxSell.c < 0 ? mLabel(d.maxSell.i) : null),
     dstat("Peak", tonnes(d.peak.v), mLabel(d.peak.i)),
     rx ? dstat("Gold share of reserves", pct1(rx.latest.share), `${mLabel(rx.last)}${rx.revalued ? ", revalued at market" : ""}`) : null,
+    minedStat(m, code),
   );
 
   const pts0 = [...d.s.entries()].sort((a, b) => a[0] - b[0]).map(([i, v]) => ({ i, v }));
@@ -1381,6 +1393,8 @@ function renderNotes(m, r) {
     h("p", {}, "When the daily job finds new or revised IMF figures, spike/changes.py compares them with the previous commit and records the difference in data/changes.json. It recomputes the headline gauge before and after, the same way this page does. If a month enters the totals, the gauge's word changes or one holder moves 20 t or more in a month (or a past month is revised by 10 t or more), it opens a GitHub issue assigned to the repo owner; GitHub sends the email."),
     h("h3", {}, "Funds"),
     h("p", {}, "The Funds panel is market data, not official reserves, and it comes from two other sources, loaded by your browser when the page opens: SPDR Gold Shares' historical archive (the GLD trust's tonnes of gold, daily) and the CFTC's Commitments of Traders report for COMEX gold (weekly). Neither is copied into this repo; the GLD archive's terms don't allow redistribution. If either source is down, only that chart is missing."),
+    h("h3", {}, "Mine production"),
+    h("p", {}, "Yearly mine output by country. The two latest years come from the USGS Mineral Commodity Summaries (the newest year is a USGS estimate); a monthly job, separate from the daily IMF job, fetches them and commits data/production_usgs.json when they change. Earlier years, back to 1900, come from Our World in Data, which combines USGS and British Geological Survey figures; your browser loads them, because the BGS keeps copyright in its figures. For the USGS years the page uses only the USGS figures, so smaller producers are grouped as \"Other countries\". The share of mine output divides a calendar year's net reported central bank change by world mine production that year."),
     h("h3", {}, "Gold's share of reserves"),
     h("p", {}, "Countries value their gold differently, so the reported dollar values can't be used as they are. This page takes one price per month, the median dollars per ounce across all holders with at least 1 t (it tracks the market price), revalues every holder's gold at it, and replaces the reported gold value inside total reserves with that market value."),
     revalued.length ? h("p", {}, `Holders whose own value is more than 10% off that price, mostly because they use an old official price or historical cost: ${revalued.map((x) => x.name).join(", ")}. The US, for example, values its gold at the statutory $42.22 an ounce.`) : null,
@@ -1725,6 +1739,200 @@ async function loadFunds() {
   draw();
 }
 
+/* ---------- Mine production ---------- */
+
+// Years -> { y, world, est, by: Map(code -> {v, est}), other }. The USGS file covers the two
+// latest years and replaces Our World in Data for those whole years, so a year never mixes the
+// two sources (OWID's latest year is an earlier USGS estimate anyway).
+function buildProduction(usgs, owid) {
+  const years = new Map();
+  const yearRow = (y) => years.get(y) || years.set(y, { y, world: null, est: false, by: new Map(), other: null }).get(y);
+  const names = new Map();
+  if (owid) {
+    const ents = new Map(owid.meta.dimensions.entities.values.map((e) => [e.id, e]));
+    owid.data.values.forEach((v, k) => {
+      const e = ents.get(owid.data.entities[k]);
+      if (!e?.code || typeof v !== "number") return;
+      names.set(e.code, e.name);
+      const yr = yearRow(owid.data.years[k]);
+      if (e.code === "OWID_WRL") yr.world = v; else yr.by.set(e.code, { v });
+    });
+  }
+  if (usgs?.production) {
+    for (const [y] of usgs.production.WLD || []) years.delete(y);
+    for (const [code, rows] of Object.entries(usgs.production)) {
+      for (const [y, v, e] of rows) {
+        const yr = yearRow(y), est = e === "est";
+        if (code === "WLD") { yr.world = v; yr.est = est; } else if (code === "OTH") yr.other = v; else yr.by.set(code, { v, est });
+      }
+    }
+  }
+  const list = [...years.values()].filter((yr) => yr.world > 0).sort((a, b) => a.y - b.y);
+  if (!list.length) return null;
+  return { list, byYear: new Map(list.map((yr) => [yr.y, yr])), latest: list.at(-1), edition: usgs?.edition,
+    usgsYears: (usgs?.production?.WLD || []).map(([y]) => y), owid: Boolean(owid),
+    name: (code) => NAMES[code] || names.get(code) || code };
+}
+
+let PROD = null; // mine production, once loaded (see loadProduction)
+const prodTitle = (yr) => `${yr.y}${yr.est ? " (USGS estimate)" : ""}`;
+const producers = (yr) => [...yr.by.entries()].map(([code, x]) => ({ code, ...x })).sort((a, b) => b.v - a.v);
+
+// A holder's reported change over calendar year y: null when it isn't in the IMF data at all.
+function cbYear(m, code, y) {
+  const d = m.holders.find((x) => x.code === code);
+  if (!d) return null;
+  let v = 0, any = false;
+  for (let i = y * 12; i <= y * 12 + 11; i++) { const c = m.change(d, i); if (c !== undefined) { v += c; any = true; } }
+  return { d, v: any ? v : undefined };
+}
+
+// For the holder in view: what its country mines, in the latest year that lists it.
+function minedStat(m, code) {
+  const yr = PROD?.list.findLast((x) => x.by.has(code));
+  const v = yr?.by.get(code).v;
+  if (!v || v < 1) return null;
+  const rank = [...yr.by.values()].filter((x) => x.v > v).length + 1;
+  return dstat(`Mined in ${yr.y}`, tonnes(v), `${rank === 1 ? "Largest" : `${ordinal(rank)} largest`} producer${yr.by.get(code).est ? " · USGS estimate" : ""}`);
+}
+
+function renderSupply(m, p, owidErr) {
+  const latest = p.latest;
+  const cbOf = new Map(m.years.filter((y) => !y.partial).map((y) => [y.i, y]));
+  const share = p.list.filter((yr) => cbOf.has(yr.y)).map((yr) => ({ i: yr.y, v: cbOf.get(yr.y).v / yr.world, cb: cbOf.get(yr.y).v, yr }));
+  const lastS = share.at(-1);
+  const peak = share.reduce((a, x) => (x.v > a.v ? x : a), share[0]);
+  const back10 = p.byYear.get(latest.y - 10);
+  const tops = producers(latest);
+  const growth = back10 ? latest.world / back10.world - 1 : null;
+
+  const low = share.reduce((a, x) => (x.v < a.v ? x : a), share[0]);
+  $("supply-sub").textContent = "Gold mined each year, worldwide and by country, next to what central banks reported adding. Mine output changes slowly"
+    + (share.length >= 5 ? `; reported central bank buying has not. It has ranged from ${low.v < 0 ? `net selling of ${pct(-low.v)}` : pct(low.v)} of it (${low.i}) to net buying of ${pct(peak.v)} (${peak.i}).` : ".");
+  put("supply-stats",
+    dstat(`Mined worldwide, ${latest.y}`, tonnes(latest.world), latest.est ? "USGS estimate" : "USGS"),
+    back10 ? dstat(`Versus ${back10.y}`, delta(growth, `${pct(Math.abs(growth))}`, 0.005), `${tonnes(back10.world)} then`) : null,
+    lastS ? dstat(`Central banks, ${lastS.i}`, sv(lastS.cb), `reported net, ${pct(lastS.v)} of mine output`) : null,
+    share.length >= 5 ? dstat("Highest share", pct(peak.v), `${peak.i}: ${signed(peak.cb)} of ${tonnes(peak.yr.world)}`) : null,
+    tops[0] ? dstat("Largest producer", p.name(tops[0].code), `${tonnes(tops[0].v)}, ${pct(tops[0].v / latest.world)} of the world's`) : null);
+
+  // The headline row gets the share too: it is the one number here that moves with central banks.
+  const pace = document.querySelector('#stat-groups [data-group="Pace"]');
+  if (pace && lastS) {
+    pace.querySelector(".stat.supply")?.remove();
+    const st = stat("Share of mine output", pct(lastS.v), [`${lastS.i}: ${signed(lastS.cb)} reported, ${tonnes(lastS.yr.world)} mined`]);
+    st.classList.add("supply");
+    pace.append(st);
+  }
+
+  if (share.length) {
+    $("supply-share-sub").textContent = `Net reported central bank buying in each calendar year divided by world mine production that year, ${share[0].i} to ${lastS.i}. `
+      + "Below zero, central banks were net sellers. Reported buying only: the World Gold Council's estimate of all central bank buying (over 1,000 t a year in 2022–24) would be about a third of mine output."
+      + (cbOf.has(latest.y + 1) ? ` Years after ${latest.y} wait for the USGS figures.` : "");
+    columnChart($("chart-supply-share"), {
+      bars: share.map((x) => ({ i: x.i, v: x.v, x })),
+      axis: "years",
+      height: 220,
+      fmtTick: pctTick,
+      label: `Column chart of reported central bank net gold buying as a share of world mine production, ${share[0].i} to ${lastS.i}. Latest ${pct(lastS.v)}.`,
+      tipTitle: (b) => prodTitle(b.x.yr),
+      tipRows: (b) => [
+        { value: pct1(b.v), label: "of mine output", key: b.v >= 0 ? "buy" : "sell" },
+        "sep",
+        { value: signed(b.x.cb), label: "central banks, net reported" },
+        { value: tonnes(b.x.yr.world), label: "mined worldwide" },
+      ],
+    });
+  }
+
+  const wp = p.list.map((yr) => ({ i: yr.y * 12, v: yr.world, yr }));
+  $("supply-world-sub").textContent = `Tonnes a year, ${wp[0].yr.y} to ${latest.y}. The tooltip names the largest producers each year.`;
+  lineChart($("chart-supply-world"), {
+    points: wp,
+    height: 220,
+    endLabel: (q) => tonnes(q.v),
+    tipTitle: (q) => prodTitle(q.yr),
+    label: `Line chart of world gold mine production per year, ${wp[0].yr.y} to ${latest.y}. Latest ${tonnes(latest.world)}.`,
+    tipRows: (q) => [{ value: tonnes(q.v), label: "mined worldwide", key: "line" },
+      ...producers(q.yr).slice(0, 3).map((x) => ({ value: tonnes(x.v), label: p.name(x.code) }))],
+  });
+
+  // Largest producers, and what their own central bank reported doing that year.
+  const cbLine = (code) => {
+    const cb = cbYear(m, code, latest.y);
+    if (!cb) return { value: "–", label: "central bank not in the IMF data" };
+    if (cb.v === undefined) return { value: "–", label: `central bank, no ${latest.y} report` };
+    return { value: signed(cb.v), label: `central bank, ${latest.y}`, key: { pos: "buy", neg: "sell" }[tone(cb.v)] };
+  };
+  // "Other countries" stays out of the chart (one 1,000 t bar would flatten every country) and
+  // goes in the table.
+  const rows = tops.slice(0, 15).map((x) => ({ name: p.name(x.code), v: x.v, x }));
+  $("producers-h").textContent = `Largest producers in ${latest.y}`;
+  $("producers-sub").textContent = `Tonnes mined${latest.est ? " (USGS estimates)" : ""}`
+    + (latest.other ? `; all other countries together mined ${tonnes(latest.other)} (${pct(latest.other / latest.world)} of the world's).` : ".")
+    + " Hover a bar for what that country's central bank reported in the same year: some buy local mine output (Kazakhstan's has first refusal on it), most don't.";
+  hbarChart($("chart-producers"), {
+    rows,
+    neutral: true,
+    fmt: tonnes,
+    label: `Bar chart of gold mine production by country in ${latest.y}. Largest: ${rows[0].name}, ${tonnes(rows[0].v)}.`,
+    tipRows: (r) => [{ value: tonnes(r.v), label: "mined" }, { value: pct1(r.v / latest.world), label: "of world output" },
+      "sep", cbLine(r.x.code)],
+  });
+  if (latest.other) rows.push({ name: "Other countries", v: latest.other, x: null }); // table only
+  $("table-producers").replaceChildren(tableDetails("Show producers as a table",
+    table(`Largest gold producers in ${latest.y} and their central banks' reported change that year`,
+      ["Producer", `Mined ${latest.y}`, "Share of world", back10 ? `Change since ${back10.y}` : "Change", `Central bank ${latest.y}`, "Central bank vs mined"],
+      [...rows.map((r) => {
+        const old = r.x ? back10?.by.get(r.x.code)?.v : back10?.other;
+        const cb = r.x ? cbYear(m, r.x.code, latest.y) : null;
+        const cbv = cb?.v;
+        return [r.name, tonnes(r.v), pct1(r.v / latest.world), old === undefined || old === null ? "–" : sv(r.v - old),
+          !r.x ? "–" : !cb ? "not in IMF data" : cbv === undefined ? "–" : sv(cbv),
+          cbv === undefined ? "–" : pct(cbv / r.v)];
+      }), ["World", tonnes(latest.world), "100.0%", back10 ? sv(latest.world - back10.world) : "–", lastS?.i === latest.y ? sv(lastS.cb) : "–",
+        lastS?.i === latest.y ? pct(lastS.v) : "–"]])));
+
+  const owidNote = owidErr ? ` Our World in Data didn't load (${owidErr.message || owidErr}), so only the USGS years are shown.` : "";
+  $("supply-note").classList.toggle("error", Boolean(owidErr));
+  $("supply-note").replaceChildren(h("span", {},
+    `Mine output only: recycled gold, roughly a quarter of yearly supply, is not in these figures. Sources: USGS Mineral Commodity Summaries ${p.edition ?? ""} for ${p.usgsYears.join(" and ") || "the latest years"} (in this repo); `
+    + `earlier years from Our World in Data (USGS and British Geological Survey figures), loaded by your browser. The World Gold Council's supply figures run higher, as it estimates more small-scale mining.${owidNote}`));
+  $("table-supply").replaceChildren(tableDetails("Show years as a table",
+    table("World gold mine production and reported central bank net buying per year", ["Year", "Mined worldwide", "Central banks, net reported", "Share of mine output"],
+      p.list.slice().reverse().map((yr) => {
+        const cb = cbOf.get(yr.y);
+        return [prodTitle(yr), tonnes(yr.world), cb ? sv(cb.v) : "–", cb ? pct1(cb.v / yr.world) : "–"];
+      }), { scroll: true })));
+}
+
+async function loadProduction(m, r) {
+  const owidJSON = async (kind) => {
+    const res = await fetch(`${OWID_PROD}.${kind}.json`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  };
+  const [u, o] = await Promise.allSettled([
+    getJSON(PRODUCTION_URL),
+    Promise.all([owidJSON("data"), owidJSON("metadata")]).then(([data, meta]) => {
+      if (!data.values?.length || !meta.dimensions?.entities?.values) throw new Error("unexpected format");
+      return { data, meta };
+    }),
+  ]);
+  const p = buildProduction(u.status === "fulfilled" ? u.value : null, o.status === "fulfilled" ? o.value : null);
+  if (!p) {
+    put("supply-stats");
+    const sub = $("supply-sub");
+    sub.textContent = `Couldn't load mine production (${PRODUCTION_URL}: ${u.reason?.message || "no data"}; Our World in Data: ${o.reason?.message || "no data"}). The rest of the page doesn't depend on it.`;
+    sub.classList.add("chart-note", "error");
+    return;
+  }
+  PROD = p;
+  renderSupply(m, p, o.status === "rejected" ? o.reason : null);
+  const sel = $("country-select");
+  if (sel.value) renderCountry(m, r, sel.value); // adds "Mined in …" to the holder in view
+}
+
 /* ---------- Boot ---------- */
 
 async function getJSON(url) {
@@ -1792,7 +2000,8 @@ async function main() {
   scrollSpy();
   // A shared link with #section: the page was empty when the browser tried to jump there.
   if (location.hash && $(location.hash.slice(1))) $(location.hash.slice(1)).scrollIntoView();
-  loadFunds(); // last, and not awaited: third-party data must never hold up the IMF sections
+  loadProduction(m, r); // these two last, and not awaited: other sources must never hold up the IMF sections
+  loadFunds();
 }
 
 main();
