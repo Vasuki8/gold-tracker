@@ -1,16 +1,29 @@
 "use strict";
-/* Central bank gold tracker. Reads data/gold_tonnes.json and data/reserves_usd.json (written
-   daily by spike/fetch_irfcl.py and spike/fetch_reserves.py) and draws everything client-side:
-   no build step, no libraries. */
+/* Central bank gold tracker. Reads data/gold_tonnes.json, data/reserves_usd.json and
+   data/changes.json (written daily by the scripts in spike/) and draws everything client-side:
+   no build step, no libraries. The Funds panel is the exception: it loads GLD and CFTC data in
+   the browser, straight from those sources (both allow it), so none of it is stored in the repo. */
 
 const DATA_URL = "data/gold_tonnes.json";
 const RESERVES_URL = "data/reserves_usd.json";
+const CHANGES_URL = "data/changes.json";
+const GLD_URL = "https://api.spdrgoldshares.com/api/v1/historical-archive?product=gld&exchange=NYSE&lang=en";
+const CFTC_URL = `https://publicreporting.cftc.gov/resource/72hh-3qpy.json?${new URLSearchParams({
+  $select: "report_date_as_yyyy_mm_dd,open_interest_all,m_money_positions_long_all,m_money_positions_short_all,"
+    + "swap_positions_long_all,swap__positions_short_all,prod_merc_positions_long,prod_merc_positions_short",
+  $where: "cftc_contract_market_code='088691'", // COMEX gold
+  $order: "report_date_as_yyyy_mm_dd",
+  $limit: "5000",
+})}`;
 const COVERAGE_MIN = 0.9; // a month counts once holders with 90% of the past year's activity have filed it
 const STALE_MONTHS = 6; // nothing reported this long before the newest month: stale, left out of coverage
 const BRIDGE_MONTHS = 3; // a change may span up to 3 missing months (dropped or unreported values)
 const TOP_N = 15;
 const BUY_T = 0.1; // a month with an increase of at least 0.1 t counts as a purchase
+const BREADTH_T = 1; // a holder is "adding" when its 12-month change is at least +1 t ("reducing": -1 t)
 const OZ_PER_TONNE = 32150.7466;
+const CONTRACT_T = 100 / OZ_PER_TONNE; // one COMEX gold contract is 100 troy ounces
+const DAY_MS = 86400000;
 
 const NAMES = {
   ALB: "Albania", ARG: "Argentina", ARM: "Armenia", AUS: "Australia", AUT: "Austria", BEL: "Belgium",
@@ -82,7 +95,17 @@ const usdMn = (mn) => (mn >= 1e6 ? `$${(mn / 1e6).toFixed(2)} tn` : mn >= 1e3 ? 
 const tickText = (v) => `${v < 0 ? MINUS : ""}${NF0.format(Math.abs(v))}`;
 const pctTick = (v) => `${Math.round(v * 100)}%`;
 const usdTick = (v) => `$${NF0.format(v)}`;
+const tnTick = (mn) => (mn === 0 ? "0" : `$${(mn / 1e6).toLocaleString("en", { maximumFractionDigits: 1 })} tn`);
+const count = (v) => NF0.format(v);
+const signedCount = (v) => `${v > 0 ? "+" : v < 0 ? MINUS : ""}${NF0.format(Math.abs(v))}`;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+// Days: daily and weekly series sit on the same month axis as everything else, as a fractional
+// month index (15 Mar 2026 -> March 2026 + 14/31).
+const DAY = new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+const dayIdx = (t) => {
+  const d = new Date(t), y = d.getUTCFullYear(), mo = d.getUTCMonth();
+  return y * 12 + mo + (d.getUTCDate() - 1) / new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+};
 // Up/down tone for text: green/red, and never color alone (always a sign or an arrow).
 const tone = (v, eps = 0.05) => (v > eps ? "pos" : v < -eps ? "neg" : null);
 const arrow = (v, eps = 0.05) => (v > eps ? "▲" : v < -eps ? "▼" : "●");
@@ -112,6 +135,27 @@ const sv = (v) => h("span", { class: tone(v) }, signed(v));
 const delta = (v, text, eps = 0.05) => h("span", { class: tone(v, eps) }, `${arrow(v, eps)} ${text}`);
 // replaceChildren() would turn a null into the text "null", so optional pieces are filtered out first.
 const put = (id, ...kids) => $(id).replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
+
+// The view lives in the query string (?holder=POL&range=10&cmp=POL,CHN,IND&cmode=change), so a
+// link reopens the same view. Defaults are left out; replaceState, so Back isn't flooded.
+const params = new URLSearchParams(location.search);
+function setParam(k, v) {
+  if (v === null || v === undefined || v === "" || v === 0 || v === "0") params.delete(k); else params.set(k, v);
+  const q = params.toString().replace(/%2C/gi, ","); // readable lists: cmp=POL,CHN
+  history.replaceState(null, "", `${location.pathname}${q ? `?${q}` : ""}${location.hash}`);
+}
+// A segmented control: press the button matching `value`, call onPick(value) on clicks.
+function wireSeg(id, value, onPick) {
+  const box = $(id);
+  const press = (v) => { for (const b of box.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === String(v))); };
+  press(value);
+  box.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    press(b.dataset.v);
+    onPick(b.dataset.v);
+  });
+}
 
 /* ---------- The gold model ---------- */
 
@@ -258,8 +302,25 @@ function buildModel(raw) {
   }
   marks.sort((a, b) => a.i - b.i).forEach((mk, k) => { mk.n = k + 1; });
 
+  // Breadth and concentration at each complete month: how many holders added (or cut) at least
+  // BREADTH_T over the 12 months to it, and how much of the gross buying the top two did.
+  const breadth = [];
+  for (let i = first + 12; i <= complete; i++) {
+    let buyers = 0, sellers = 0, gross = 0;
+    const pos = [];
+    for (const d of holders) {
+      const v = sumOver(d, i - 11, i);
+      if (v === undefined) continue;
+      if (v >= BREADTH_T) buyers++; else if (v <= -BREADTH_T) sellers++;
+      if (v > 0) { gross += v; pos.push({ d, v }); }
+    }
+    pos.sort((a, b) => b.v - a.v);
+    const top = pos.slice(0, 2);
+    breadth.push({ i, buyers, sellers, gross, top, share: gross ? top.reduce((a, x) => a + x.v, 0) / gross : 0 });
+  }
+
   return { raw, holders, newest, first, complete, months, rolling12, groupRolling, win, byCountry, regions, years,
-    worldTotal, marks, turn: turnIdx >= 0 ? rolling12[turnIdx].i : null, sumNet, valueAt, change };
+    worldTotal, marks, breadth, turn: turnIdx >= 0 ? rolling12[turnIdx].i : null, sumNet, valueAt, change };
 }
 
 /* ---------- The reserves model (US dollars) ---------- */
@@ -428,6 +489,17 @@ function yGrid(svg, yt, Y, left, right, fmt = tickText) {
 }
 
 function yearAxis(svg, x0, x1, X, y, centerOffset = 0) {
+  if (x1 - x0 < 30) {
+    // A year or two of daily data: label months (every 1, 3 or 6), with the year on January.
+    const perMonth = Math.abs(X(1) - X(0));
+    const every = [1, 3, 6, 12].find((n) => perMonth * n >= 44) || 12;
+    for (let i = Math.ceil(x0); i <= x1; i++) {
+      if (i % every) continue;
+      svg.append(s("text", { x: X(i) + centerOffset, y: y + 18, class: "tick", "text-anchor": "middle" },
+        i % 12 === 0 ? String(yearOf(i)) : MONTH_ONLY.format(asDate(i))));
+    }
+    return;
+  }
   const years = [];
   for (let yr = yearOf(x0); yr <= yearOf(x1); yr++) if (yr * 12 >= x0 && yr * 12 <= x1) years.push(yr);
   if (!years.length) return;
@@ -459,16 +531,21 @@ function hbarPath(x0, x1, y, ht, r = 4) {
 
 function lineChart(container, opts) {
   const { points, label, height = 280, endLabel, tipRows, tipTitle = (p) => mLabel(p.i), fmtTick = tickText,
-    cls = "", bands = [], marks = [], yMax } = opts;
+    cls = "", bands = [], marks = [], yMax, domain, zero = true } = opts;
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
     const M = { t: marks.length ? 30 : 14, r: endLabel ? (narrow ? 60 : 72) : 16, b: 30, l: 52 };
     const pw = W - M.l - M.r, ph = height - M.t - M.b;
-    const x0 = points[0].i, x1 = points.at(-1).i;
+    // domain: a fixed x range, so charts stacked under each other line up month for month.
+    const [x0, x1] = domain || [points[0].i, points.at(-1).i];
     const X = (i) => M.l + (x1 === x0 ? pw / 2 : ((i - x0) / (x1 - x0)) * pw);
+    // zero: false lets a level series (a fund's tonnes) fill the height. Fine for a line, which is
+    // read by its shape; bars always start at zero.
     const vs = points.map((p) => p.v);
-    const yt = niceTicks(Math.min(0, ...vs), Math.max(0, ...vs, yMax ?? -Infinity), narrow ? 4 : 5);
+    const yt = zero ? niceTicks(Math.min(0, ...vs), Math.max(0, ...vs, yMax ?? -Infinity), narrow ? 4 : 5)
+      : niceTicks(Math.min(...vs), Math.max(...vs), narrow ? 4 : 5);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
+    const floor = Math.min(Math.max(0, yt.lo), yt.hi); // where the area under the line closes
     const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
     for (const b of bands) {
       const bx0 = X(Math.max(b.from, x0)), bx1 = X(Math.min(b.to, x1));
@@ -494,7 +571,7 @@ function lineChart(container, opts) {
     }
     const d = points.map((p, k) => `${k ? "L" : "M"}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
     svg.append(
-      s("path", { d: `${d}L${X(x1).toFixed(1)},${Y(0)}L${X(x0).toFixed(1)},${Y(0)}Z`, class: `area ${cls}` }),
+      s("path", { d: `${d}L${X(points.at(-1).i).toFixed(1)},${Y(floor)}L${X(points[0].i).toFixed(1)},${Y(floor)}Z`, class: `area ${cls}` }),
       s("path", { d, class: `line ${cls}` }),
     );
     const last = points.at(-1);
@@ -524,16 +601,19 @@ function lineChart(container, opts) {
   });
 }
 
-// Two or more series on one axis, one shared crosshair; the tooltip lists every series.
-function multiLineChart(container, { series, label, height = 280, fmt = signed, fmtTick = tickText, tipExtra }) {
+// Two or three series on one axis, one shared crosshair; the tooltip lists every series. Every
+// series has a point for every x (same i, same order); v === null is a gap (not reported).
+const has = (v) => v !== null && v !== undefined;
+function multiLineChart(container, { series, label, height = 280, fmt = signed, fmtTick = tickText, tipExtra,
+  tipTitle = (p) => mLabel(p.i) }) {
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
     const M = { t: 14, r: narrow ? 60 : 72, b: 30, l: 52 };
     const pw = W - M.l - M.r, ph = height - M.t - M.b;
     const base = series[0].points;
     const x0 = base[0].i, x1 = base.at(-1).i;
-    const X = (i) => M.l + ((i - x0) / Math.max(1, x1 - x0)) * pw;
-    const vs = series.flatMap((sr) => sr.points.map((p) => p.v));
+    const X = (i) => M.l + ((i - x0) / ((x1 - x0) || 1)) * pw;
+    const vs = series.flatMap((sr) => sr.points.map((p) => p.v)).filter(has);
     const yt = niceTicks(Math.min(0, ...vs), Math.max(0, ...vs), narrow ? 4 : 5);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
     const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
@@ -541,14 +621,20 @@ function multiLineChart(container, { series, label, height = 280, fmt = signed, 
     yearAxis(svg, x0, x1, (i) => X(i), M.t + ph);
     const ends = [];
     for (const sr of series) {
-      const d = sr.points.map((p, k) => `${k ? "L" : "M"}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+      let d = "", pen = false;
+      for (const p of sr.points) {
+        if (!has(p.v)) { pen = false; continue; }
+        d += `${pen ? "L" : "M"}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`;
+        pen = true;
+      }
       svg.append(s("path", { d, class: `line ${sr.cls}` }));
-      const last = sr.points.at(-1);
+      const last = sr.points.findLast((p) => has(p.v));
+      if (!last) continue;
       svg.append(s("circle", { cx: X(last.i), cy: Y(last.v), r: 4, class: `dot ${sr.cls}` }));
       ends.push({ y: Y(last.v), text: fmt(last.v), x: X(last.i) });
     }
     // Direct end labels only when they don't collide; the legend and tooltip carry identity anyway.
-    const clash = ends.some((a, k) => ends.some((b, j) => j > k && Math.abs(a.y - b.y) < 14));
+    const clash = ends.some((a, k) => ends.some((b, j) => j > k && Math.abs(a.y - b.y) < 14 && Math.abs(a.x - b.x) < 70));
     if (!clash) for (const e of ends) svg.append(s("text", { x: e.x + 9, y: e.y, class: "end-label", "dominant-baseline": "middle" }, e.text));
     const cross = s("line", { y1: M.t, y2: M.t + ph, class: "cross", visibility: "hidden" });
     const hots = series.map((sr) => s("circle", { r: 4, class: `dot ${sr.cls}`, visibility: "hidden" }));
@@ -558,12 +644,18 @@ function multiLineChart(container, { series, label, height = 280, fmt = signed, 
       show(k) {
         const x = X(base[k].i);
         cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("visibility", "visible");
-        series.forEach((sr, j) => { const p = sr.points[k]; hots[j].setAttribute("cx", x); hots[j].setAttribute("cy", Y(p.v)); hots[j].setAttribute("visibility", "visible"); });
-        fillTip(tip, mLabel(base[k].i), [
-          ...series.map((sr) => ({ value: fmt(sr.points[k].v), label: sr.name, key: sr.cls || "buy" })),
+        const ys = [];
+        series.forEach((sr, j) => {
+          const p = sr.points[k];
+          if (!has(p.v)) { hots[j].setAttribute("visibility", "hidden"); return; }
+          ys.push(Y(p.v));
+          hots[j].setAttribute("cx", x); hots[j].setAttribute("cy", Y(p.v)); hots[j].setAttribute("visibility", "visible");
+        });
+        fillTip(tip, tipTitle(base[k]), [
+          ...series.map((sr) => ({ value: has(sr.points[k].v) ? fmt(sr.points[k].v) : "–", label: sr.name, key: sr.cls || "line" })),
           ...(tipExtra ? tipExtra(k) : []),
         ]);
-        placeTip(tip, container, x, Math.min(...series.map((sr) => Y(sr.points[k].v))));
+        placeTip(tip, container, x, ys.length ? Math.min(...ys) : M.t);
       },
       hide() {
         cross.setAttribute("visibility", "hidden"); hots.forEach((c) => c.setAttribute("visibility", "hidden"));
@@ -700,7 +792,43 @@ function table(caption, head, rows, { scroll = false } = {}) {
       h("tbody", {}, rows.map((r) => h("tr", {}, r.map((c, k) => (k === 0
         ? h("th", { scope: "row", class: "l" }, c) : h("td", {}, c))))))));
 }
-const tableDetails = (summary, tbl) => h("details", { class: "data-table" }, h("summary", {}, summary), tbl);
+const tableDetails = (summary, tbl) => h("details", { class: "data-table" }, h("summary", {}, summary), tbl, csvButton(tbl));
+
+// A table as CSV. Numbers come out bare ("+1,234.5 t" -> 1234.5, "−3" -> -3) with the unit moved
+// into the header, so the file opens as numbers in a spreadsheet; everything else stays text.
+const NUM_CELL = /^([+−-]?)(\$?)([\d,]+(?:\.\d+)?)\s*(t|%|\/oz)?$/;
+function tableCSV(tbl) {
+  const rows = [...tbl.querySelectorAll("tr")].map((tr) => [...tr.children].map((c) => c.textContent.replace(/\s+/g, " ").trim()));
+  const [head, ...body] = rows;
+  const units = head.map((_, j) => {
+    const us = new Set();
+    for (const r of body) { const mt = NUM_CELL.exec(r[j] || ""); if (mt) us.add(mt[2] ? "US$" : mt[4] || ""); }
+    return us.size === 1 ? [...us][0] : null;
+  });
+  const keep = head.map((_, j) => body.some((r) => r[j])); // drop columns with no text (sparklines)
+  const cell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const out = [head.map((t, j) => (units[j] ? `${t} (${units[j]})` : t))];
+  for (const r of body) {
+    out.push(r.map((v, j) => {
+      const mt = units[j] !== null ? NUM_CELL.exec(v) : null;
+      return mt ? `${mt[1] === "+" || !mt[1] ? "" : "-"}${mt[3].replace(/,/g, "")}` : v;
+    }));
+  }
+  return out.map((r) => r.filter((_, j) => keep[j]).map(cell).join(",")).join("\r\n");
+}
+const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 70);
+function downloadCSV(tbl) {
+  const name = `gold-${slug(tbl.caption?.textContent || "table")}.csv`;
+  const url = URL.createObjectURL(new Blob(["﻿", tableCSV(tbl)], { type: "text/csv;charset=utf-8" }));
+  const a = h("a", { href: url, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function csvButton(wrap) {
+  return h("button", { type: "button", class: "csv-btn", onclick: () => downloadCSV(wrap.querySelector("table")) }, "Download CSV");
+}
 
 /* ---------- Sections ---------- */
 
@@ -777,6 +905,12 @@ function stat(label, value, subs = [], cls = null) {
 }
 const group = (title, ...stats) => h("div", { class: "stat-group" }, h("h3", { class: "stat-group-title" }, title), ...stats.filter(Boolean));
 
+function breadthStat(m) {
+  const now = m.breadth.at(-1), then = m.breadth.find((p) => p.i === now.i - 12);
+  return stat("Holders adding gold", `${now.buyers} vs ${now.sellers} cutting`, [`at least ${BREADTH_T} t over 12 months`,
+    then ? delta(now.buyers - then.buyers, `${signedCount(now.buyers - then.buyers)} adding vs a year earlier`, 0.5) : null]);
+}
+
 function renderStatGroups(m, r, log) {
   const k = headline(m);
   const word = trendWord(k.r12, k.pace);
@@ -795,7 +929,8 @@ function renderStatGroups(m, r, log) {
         h("div", { class: "meter", role: "img", "aria-label": `${pct(k.share)} share` }, h("span", { style: `width:${(k.share * 100).toFixed(1)}%` }))]),
       k.buyers[0] ? stat("Top buyer", k.buyers[0].d.name, [h("span", {}, sv(k.buyers[0].v), " over 12 months")]) : null,
       k.sellers[0] ? stat("Biggest seller", k.sellers[0].d.name, [h("span", {}, sv(k.sellers[0].v), " over 12 months")]) : null,
-      stat("Regular buyers", String(regular), ["bought in 3+ of their last 12 months"])),
+      stat("Regular buyers", String(regular), ["bought in 3+ of their last 12 months"]),
+      breadthStat(m)),
   ];
   if (r && r.worldSeries.length) {
     const { now, then } = shareYearAgo(r);
@@ -817,9 +952,10 @@ function renderStatGroups(m, r, log) {
   put("stat-groups", groups);
 }
 
-function renderRolling(m, years = 0) {
+function renderRolling(m, r, years = 0) {
   const all = m.rolling12;
   const pts12 = years ? all.filter((p) => p.i > all.at(-1).i - years * 12) : all;
+  renderTrendPrice(m, r, pts12[0].i, pts12.at(-1).i);
   lineChart($("chart-rolling"), {
     points: pts12,
     label: `Line chart of 12-month net reported central bank gold buying, ${mLabel(pts12[0].i)} to ${mLabel(pts12.at(-1).i)}. Latest ${signed(pts12.at(-1).v)}.`,
@@ -827,7 +963,7 @@ function renderRolling(m, years = 0) {
     bands: m.turn ? [{ from: pts12[0].i, to: m.turn, label: "Net selling, led by European central banks" }] : [],
     marks: m.marks,
     tipRows: (p) => [
-      { value: signed(p.v), label: "12-month net", key: "buy" },
+      { value: signed(p.v), label: "12-month net", key: "line" },
       { value: signed(m.months.get(p.i).net), label: "that month" },
     ],
   });
@@ -839,14 +975,31 @@ function renderRolling(m, years = 0) {
       yearly.map((p) => [mLabel(p.i), sv(p.v)]), { scroll: true })));
 }
 
-function wireTrendRange(m) {
-  const box = $("trend-range");
-  box.addEventListener("click", (ev) => {
-    const b = ev.target.closest("button");
-    if (!b) return;
-    for (const x of box.querySelectorAll("button")) x.setAttribute("aria-pressed", String(x === b));
-    renderRolling(m, Number(b.dataset.years));
+// The implied gold price under the trend, over exactly the same months, so the two read as one
+// picture without a second y-axis on the same chart.
+function renderTrendPrice(m, r, x0, x1) {
+  const box = $("trend-price");
+  const pp = r ? r.price.filter((p) => p.i >= x0 && p.i <= x1) : [];
+  box.hidden = pp.length < 2;
+  if (box.hidden) return;
+  const r12 = new Map(m.rolling12.map((p) => [p.i, p.v]));
+  lineChart($("chart-trend-price"), {
+    points: pp,
+    domain: [x0, x1],
+    height: 170,
+    cls: "s2",
+    fmtTick: usdTick,
+    endLabel: (p) => usd(p.v),
+    label: `Line chart of the gold price implied by IMF data, ${mLabel(pp[0].i)} to ${mLabel(pp.at(-1).i)}, on the same months as the trend above.`,
+    tipRows: (p) => [{ value: usd(p.v), label: "per ounce", key: "s2" },
+      ...(r12.has(p.i) ? [{ value: signed(r12.get(p.i)), label: "12-month net buying", key: "line" }] : [])],
   });
+}
+
+function wireTrendRange(m, r) {
+  const years = [0, 5, 10].includes(Number(params.get("range"))) ? Number(params.get("range")) : 0;
+  if (years) renderRolling(m, r, years);
+  wireSeg("trend-range", years, (v) => { renderRolling(m, r, Number(v)); setParam("range", v); });
 }
 
 // Highlight the header tab of the section in view, and keep it visible in the scrolling tab row.
@@ -990,10 +1143,11 @@ function renderMomentum(m, select) {
     card("Stopped buying", stopped, (d) => `last ${mLabel(d.lastBuy)}`, "No regular buyer has gone quiet for 6 months."),
   );
   const regular = live.filter((d) => d.buys12 >= 3).sort((a, b) => b.buys12 - a.buys12 || (b.d12 ?? 0) - (a.d12 ?? 0));
-  $("momentum-table").replaceChildren(table(`Regular buyers: purchases in at least 3 of their last 12 reported months (${regular.length} holders)`,
+  const tbl = table(`Regular buyers: purchases in at least 3 of their last 12 reported months (${regular.length} holders)`,
     ["Holder", "Buying months", "Selling months", "Current streak", "12-month change", "Last purchase"],
     regular.map((d) => [nameBtn(d), `${d.buys12} of 12`, String(d.sells12), d.streak ? plural(d.streak, "month") : "–",
-      d.d12 === undefined ? "–" : sv(d.d12), d.lastBuy === undefined ? "–" : mLabel(d.lastBuy)]), { scroll: true }));
+      d.d12 === undefined ? "–" : sv(d.d12), d.lastBuy === undefined ? "–" : mLabel(d.lastBuy)]), { scroll: true });
+  $("momentum-table").replaceChildren(tbl, csvButton(tbl));
 }
 
 function renderShare(m, r) {
@@ -1016,7 +1170,7 @@ function renderShare(m, r) {
     fmtTick: pctTick,
     endLabel: (p) => pct1(p.v),
     tipRows: (p) => [
-      { value: pct1(p.v), label: "gold share", key: "buy" },
+      { value: pct1(p.v), label: "gold share", key: "line" },
       { value: usdMn(p.gold), label: "gold at market" },
       { value: usdMn(p.total), label: "all reserves" },
       ...(p.price ? [{ value: usd(p.price), label: "per ounce" }] : []),
@@ -1026,6 +1180,8 @@ function renderShare(m, r) {
     table("Gold share of reported official reserves", ["Month", "Gold share", "Gold at market", "All reserves", "Price per ounce"],
       ws.slice().reverse().map((p) => [mLabel(p.i), pct1(p.v), usdMn(p.gold), usdMn(p.total), p.price ? usd(p.price) : "–"]), { scroll: true })));
 
+  renderMix(m, r);
+
   const top = m.holders.slice().sort((a, b) => b.latest - a.latest).slice(0, TOP_N)
     .map((d) => r.byCode.get(d.code)).filter(Boolean).sort((a, b) => b.latest.share - a.latest.share);
   hbarChart($("chart-share-holders"), {
@@ -1034,7 +1190,7 @@ function renderShare(m, r) {
     neutral: true,
     label: "Bar chart of gold as a percentage of each large holder's official reserves.",
     tipRows: (row) => [
-      { value: pct1(row.v), label: `of reserves, ${mLabel(row.x.last)}`, key: "buy" },
+      { value: pct1(row.v), label: `of reserves, ${mLabel(row.x.last)}`, key: "line" },
       { value: usdMn(row.x.latest.goldMkt), label: "gold at market" },
       { value: usdMn(row.x.latest.totalAdj), label: "all reserves" },
       ...(row.x.revalued ? ["sep", { value: "Revalued", label: "reports gold at a book price" }] : []),
@@ -1047,8 +1203,35 @@ function renderShare(m, r) {
     fmtTick: usdTick,
     endLabel: (p) => usd(p.v),
     label: `Line chart of the gold price implied by IMF reserve data, ${mLabel(pr[0].i)} to ${mLabel(pr.at(-1).i)}. Latest ${usd(pr.at(-1).v)} per ounce.`,
-    tipRows: (p) => [{ value: usd(p.v), label: "per ounce", key: "buy" }, { value: String(p.n), label: "holders in the median" }],
+    tipRows: (p) => [{ value: usd(p.v), label: "per ounce", key: "line" }, { value: String(p.n), label: "holders in the median" }],
   });
+}
+
+// Gold at market value next to everything else in reserves (foreign currency, SDRs, IMF
+// position), both in US dollars, so "more gold" can be told apart from "less of the rest".
+function renderMix(m, r) {
+  const ws = r.worldSeries;
+  const now = ws.at(-1), then = ws.find((p) => p.i === now.i - 12);
+  const series = [
+    { name: "Gold at market value", cls: "s2", points: ws.map((p) => ({ i: p.i, v: p.gold })) },
+    { name: "Everything else", cls: "", points: ws.map((p) => ({ i: p.i, v: p.total - p.gold })) },
+  ];
+  const chg = (a, b) => `${a >= b ? "+" : MINUS}${pct1(Math.abs(a / b - 1))}`;
+  $("mix-sub").textContent = `All reporting holders together, US dollars, ${mLabel(ws[0].i)} to ${mLabel(now.i)}. `
+    + (then ? `Over the last 12 months gold's market value moved ${chg(now.gold, then.gold)} and everything else ${chg(now.total - now.gold, then.total - then.gold)}. ` : "")
+    + "Everything else is mostly foreign-currency assets; its dollar value also moves with exchange rates, so a weaker dollar lifts it without anyone buying.";
+  $("mix-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+  multiLineChart($("chart-mix"), {
+    series,
+    fmt: usdMn,
+    fmtTick: tnTick,
+    label: `Line chart of gold at market value and all other official reserves, US dollars, ${mLabel(ws[0].i)} to ${mLabel(now.i)}.`,
+    tipExtra: (k) => [{ value: pct1(ws[k].v), label: "gold share" }],
+  });
+  const decs = ws.filter((p) => p.i % 12 === 11 || p === now).reverse();
+  $("table-mix").replaceChildren(tableDetails("Show as a table",
+    table("Gold at market value and everything else in reported reserves, US$ millions", ["Month", "Gold at market (US$ M)", "Everything else (US$ M)", "Gold share"],
+      decs.map((p) => [mLabel(p.i), NF0.format(p.gold), NF0.format(p.total - p.gold), pct1(p.v)]), { scroll: true })));
 }
 
 function renderBoard(m, r, select) {
@@ -1074,11 +1257,12 @@ function renderBoard(m, r, select) {
       r ? h("td", {}, rx ? pct(rx.latest.share) : "–") : null,
       h("td", {}, spark.length > 1 ? sparkline(spark) : "–"));
   });
-  $("board-table").replaceChildren(h("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-labelledby": id },
+  const wrap = h("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-labelledby": id },
     h("table", {},
       h("caption", { id }, "Largest reported gold holders. Select a name to see it in depth below."),
       h("thead", {}, h("tr", {}, head.map((c, k) => h("th", { scope: "col", class: k === 0 ? "l" : null }, c)))),
-      h("tbody", {}, rows))));
+      h("tbody", {}, rows)));
+  $("board-table").replaceChildren(wrap, csvButton(wrap));
 }
 
 // One <dt>/<dd> pair in the holder view's stats grid.
@@ -1113,7 +1297,7 @@ function renderCountry(m, r, code) {
     tipRows: (p) => {
       const c = m.change(d, p.i);
       const w = m.worldTotal.get(p.i);
-      return [{ value: tonnes(p.v), label: "held", key: "buy" },
+      return [{ value: tonnes(p.v), label: "held", key: "line" },
         ...(c === undefined ? [] : [{ value: signed(c), label: "change" }]),
         ...(w ? [{ value: pct1(p.v / w), label: "of all reported gold" }] : [])];
     },
@@ -1147,7 +1331,7 @@ function renderCountry(m, r, code) {
       fmtTick: pctTick,
       endLabel: (p) => pct(p.v),
       label: `Line chart of gold's share of ${d.name}'s official reserves.`,
-      tipRows: (p) => [{ value: pct1(p.v), label: "of reserves", key: "buy" },
+      tipRows: (p) => [{ value: pct1(p.v), label: "of reserves", key: "line" },
         { value: usdMn(p.e.goldMkt), label: "gold at market" }, { value: usdMn(p.e.totalAdj), label: "all reserves" }],
     });
   } else {
@@ -1192,6 +1376,11 @@ function renderNotes(m, r) {
     h("h3", {}, "Groups, regions and momentum"),
     h("p", {}, "Advanced economies follow the IMF World Economic Outlook list, with the ECB counted as advanced; every other holder is emerging or developing. Regions are this page's own grouping, close to the IMF's: Russia and Turkey sit in Europe, Kazakhstan and Egypt in Middle East, North Africa and Central Asia."),
     h("p", {}, `A purchase is a month with an increase of at least ${BUY_T} t. "Started buying again" means a purchase in a holder's last 6 reported months after none in the 12 before; "stopped" means none in the last 6 after at least 3 in the 12 before.`),
+    h("p", {}, `Breadth counts holders whose reported gold changed by at least ${BREADTH_T} t over the 12 months to each month, each holder from its own figures. Concentration is the two biggest buyers' share of gross buying (every holder with a 12-month increase, added up); it is left out where gross buying is under 25 t, since then any two buyers are nearly all of it.`),
+    h("h3", {}, "Updates and alerts"),
+    h("p", {}, "When the daily job finds new or revised IMF figures, spike/changes.py compares them with the previous commit and records the difference in data/changes.json. It recomputes the headline gauge before and after, the same way this page does. If a month enters the totals, the gauge's word changes or one holder moves 20 t or more in a month (or a past month is revised by 10 t or more), it opens a GitHub issue assigned to the repo owner; GitHub sends the email."),
+    h("h3", {}, "Funds"),
+    h("p", {}, "The Funds panel is market data, not official reserves, and it comes from two other sources, loaded by your browser when the page opens: SPDR Gold Shares' historical archive (the GLD trust's tonnes of gold, daily) and the CFTC's Commitments of Traders report for COMEX gold (weekly). Neither is copied into this repo; the GLD archive's terms don't allow redistribution. If either source is down, only that chart is missing."),
     h("h3", {}, "Gold's share of reserves"),
     h("p", {}, "Countries value their gold differently, so the reported dollar values can't be used as they are. This page takes one price per month, the median dollars per ounce across all holders with at least 1 t (it tracks the market price), revalues every holder's gold at it, and replaces the reported gold value inside total reserves with that market value."),
     revalued.length ? h("p", {}, `Holders whose own value is more than 10% off that price, mostly because they use an old official price or historical cost: ${revalued.map((x) => x.name).join(", ")}. The US, for example, values its gold at the statutory $42.22 an ounce.`) : null,
@@ -1199,6 +1388,341 @@ function renderNotes(m, r) {
     h("h3", {}, "Reading the gauge"),
     h("p", {}, "\"Speeding up\" compares the last three months, scaled to a year, with the 12-month total; within 15% counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars."),
   );
+}
+
+/* ---------- Breadth and concentration ---------- */
+
+function renderBreadth(m) {
+  const b = m.breadth;
+  const now = b.at(-1), then = b.find((p) => p.i === now.i - 12);
+  const peak = b.reduce((a, p) => (p.buyers > a.buyers ? p : a), b[0]);
+  $("breadth-sub").textContent = `Holders whose reported gold rose by at least ${BREADTH_T} t over the 12 months to each point, and holders whose gold fell by that much. `
+    + `${mLabel(now.i)}: ${now.buyers} adding, ${now.sellers} cutting` + (then ? ` (a year earlier ${then.buyers} and ${then.sellers})` : "")
+    + `. Most holders adding at once: ${peak.buyers}, in ${mLabel(peak.i)}. More buyers is a broader signal than the same few buying more.`;
+  const series = [
+    { name: "Adding gold", cls: "buy", points: b.map((p) => ({ i: p.i, v: p.buyers })) },
+    { name: "Cutting gold", cls: "sell", points: b.map((p) => ({ i: p.i, v: p.sellers })) },
+  ];
+  $("breadth-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+  multiLineChart($("chart-breadth"), {
+    series,
+    fmt: count,
+    fmtTick: count,
+    label: `Line chart of how many holders added or cut at least ${BREADTH_T} t of gold over 12 months, ${mLabel(b[0].i)} to ${mLabel(now.i)}.`,
+    tipExtra: (k) => [{ value: signedCount(b[k].buyers - b[k].sellers), label: "adding minus cutting" }],
+  });
+
+  $("concentration-sub").textContent = `Share of all gross reported buying over 12 months done by the two biggest buyers. ${mLabel(now.i)}: ${pct(now.share)} (${now.top.map((x) => x.d.name).join(" and ")}). `
+    + "When a few buyers carry the total, one of them stopping changes the picture.";
+  const cs = b.filter((p) => p.gross >= 25); // with almost no buying, any two buyers are "all of it"
+  lineChart($("chart-concentration"), {
+    points: cs.map((p) => ({ i: p.i, v: p.share, p })),
+    height: 220,
+    fmtTick: pctTick,
+    yMax: 1,
+    endLabel: (p) => pct(p.v),
+    label: `Line chart of the two biggest buyers' share of gross reported gold buying over 12 months, ${mLabel(cs[0].i)} to ${mLabel(now.i)}. Latest ${pct(now.share)}.`,
+    tipRows: (q) => [{ value: pct(q.v), label: "top two's share", key: "line" }, { value: signed(q.p.gross), label: "gross buying" }, "sep",
+      ...q.p.top.map((x) => ({ value: signed(x.v), label: x.d.name, key: "buy" }))],
+  });
+  const decs = b.filter((p) => p.i % 12 === 11 || p === now).reverse();
+  $("table-breadth").replaceChildren(tableDetails("Show as a table",
+    table("Breadth and concentration of reported buying, at each December and the latest month",
+      ["Month", "Adding", "Cutting", "Gross buying", "Top two share", "Top two"],
+      decs.map((p) => [mLabel(p.i), count(p.buyers), count(p.sellers), signed(p.gross), pct(p.share), p.top.map((x) => x.d.name).join(", ") || "–"]),
+      { scroll: true })));
+}
+
+/* ---------- Updates (data/changes.json, written by spike/changes.py) ---------- */
+
+function renderUpdates(changes) {
+  const list = (changes || []).slice().reverse();
+  if (!list.length) {
+    $("updates-sub").textContent = "The daily job records each change it finds in the IMF figures here. None recorded yet.";
+    put("updates-list");
+    return;
+  }
+  $("updates-sub").textContent = `Each time the daily job finds new or revised IMF figures, it records what changed. ${plural(list.length, "update")} since ${DAY.format(Date.parse(`${list.at(-1).date}T00:00:00Z`))}. `
+    + "It also opens a GitHub issue, which GitHub emails, when a month enters the totals, the direction changes, or a holder moves 20 t or more in a month.";
+  const item = (x) => {
+    const when = mLabel(idx(x.month));
+    if (x.kind === "revised") return h("li", {}, h("span", {}, `${nameOf(x.code)} · ${when}`), h("span", { class: "v" }, `revised ${tonnes(x.was)} → ${tonnes(x.t)}`));
+    if (x.kind === "gone") return h("li", {}, h("span", {}, `${nameOf(x.code)} · ${when}`), h("span", { class: "v" }, `withdrawn (was ${tonnes(x.was)})`));
+    return h("li", {}, h("span", {}, `${nameOf(x.code)} · ${when}`),
+      h("span", { class: "v" }, has(x.move) ? sv(x.move) : "first figure", ` · holds ${tonnes(x.t)}`));
+  };
+  const card = (e) => {
+    const a = e.gauge.after, b = e.gauge.before;
+    const shown = e.items.filter((x) => x.kind !== "new" || (has(x.move) && Math.abs(x.move) >= 0.05) || !has(x.move));
+    const quiet = e.items.length - shown.length;
+    const top = shown.slice(0, 8);
+    return h("article", { class: "list-card update" },
+      h("h3", {}, DAY.format(Date.parse(`${e.date}T00:00:00Z`))),
+      h("p", { class: "update-tags" },
+        h("span", { class: "tag" }, plural(e.counts.new, "new figure")),
+        e.counts.revised ? h("span", { class: "tag" }, `${e.counts.revised} revised`) : null,
+        e.counts.gone ? h("span", { class: "tag" }, `${e.counts.gone} withdrawn`) : null,
+        a && b && idx(a.complete) > idx(b.complete) ? h("span", { class: "tag accent" }, `${mLabel(idx(a.complete))} now in the totals`) : null,
+        a && b && a.word !== b.word ? h("span", { class: "tag accent" }, `${b.word} → ${a.word}`) : null),
+      a && b ? h("p", { class: "update-gauge" }, `12-month net ${signed(b.r12)} → `, sv(a.r12), ` · totals through ${mLabel(idx(a.complete))} · ${a.word}`) : null,
+      top.length ? h("ul", {}, top.map(item)) : null,
+      shown.length > top.length || quiet ? h("p", { class: "update-more" },
+        [shown.length > top.length ? `${plural(shown.length - top.length, "more change")}` : null,
+          quiet ? `${plural(quiet, "new figure")} with no change` : null].filter(Boolean).join(" · ")) : null);
+  };
+  const recent = list.slice(0, 4), older = list.slice(4);
+  put("updates-list", h("div", { class: "split updates" }, recent.map(card)),
+    older.length ? h("details", { class: "data-table" }, h("summary", {}, `Older updates (${older.length})`), h("div", { class: "split updates" }, older.map(card))) : null);
+}
+
+/* ---------- Compare holders ---------- */
+
+const CMP_CLS = ["", "s2", "s3"]; // three validated series colors; a fourth fails the colorblind check
+function setupCompare(m) {
+  const sels = ["cmp-a", "cmp-b", "cmp-c"].map($);
+  const ranked = m.holders.slice().sort((a, b) => b.latest - a.latest);
+  sels.forEach((sel, k) => {
+    if (k) sel.append(h("option", { value: "" }, "None"));
+    for (const d of ranked) sel.append(h("option", { value: d.code }, d.name));
+  });
+  const known = new Set(m.holders.map((d) => d.code));
+  const asked = (params.get("cmp") || "").split(",").filter((c) => known.has(c));
+  const codes = asked.length ? asked : m.byCountry.slice().sort((a, b) => b.v - a.v).slice(0, 3).map((x) => x.d.code);
+  sels.forEach((sel, k) => { sel.value = codes[k] || (k ? "" : ranked[0].code); });
+  let mode = params.get("cmode") === "change" ? "change" : "held";
+  let years = [0, 5, 10].includes(Number(params.get("crange"))) ? Number(params.get("crange")) : 0;
+  const pick = () => [...new Set(sels.map((x) => x.value).filter(Boolean))];
+  const draw = () => renderCompare(m, pick(), mode, years);
+  for (const sel of sels) sel.addEventListener("change", () => { draw(); setParam("cmp", pick().join(",")); });
+  wireSeg("cmp-mode", mode, (v) => { mode = v; draw(); setParam("cmode", v === "change" ? v : null); });
+  wireSeg("cmp-range", years, (v) => { years = Number(v); draw(); setParam("crange", v); });
+  draw();
+}
+
+function renderCompare(m, codes, mode, years) {
+  const ds = codes.map((c) => m.holders.find((d) => d.code === c)).filter(Boolean);
+  const lastI = Math.max(...ds.map((d) => d.last));
+  const firstI = Math.max(Math.min(...ds.map((d) => d.first)), years ? lastI - years * 12 + 1 : -Infinity);
+  const series = ds.map((d, k) => {
+    const points = [];
+    let base;
+    for (let i = firstI; i <= lastI; i++) {
+      let v = i > d.last ? null : m.valueAt(d, i) ?? null;
+      if (has(v) && mode === "change") { base ??= v; v -= base; }
+      points.push({ i, v });
+    }
+    return { name: d.name, cls: CMP_CLS[k], points, d };
+  });
+  const lags = ds.filter((d) => d.last < lastI);
+  $("cmp-sub").textContent = (mode === "change"
+    ? `Change in reported holdings since ${mLabel(firstI)} (or each holder's first report after it), in tonnes.`
+    : `Reported holdings in tonnes, ${mLabel(firstI)} to ${mLabel(lastI)}.`)
+    + (lags.length ? ` ${lags.map((d) => `${d.name} has reported to ${mLabel(d.last)}`).join("; ")}, so its line ends earlier.` : "");
+  $("cmp-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+  const fmt = mode === "change" ? signed : tonnes;
+  multiLineChart($("chart-compare"), {
+    series,
+    fmt,
+    label: `Line chart comparing ${ds.map((d) => d.name).join(", ")}: ${mode === "change" ? "change in" : ""} reported gold holdings, ${mLabel(firstI)} to ${mLabel(lastI)}.`,
+  });
+  const rows = series[0].points.map((p, k) => ({ p, k })).filter(({ p }) => p.i % 12 === 11 || p.i === lastI).reverse();
+  $("table-compare").replaceChildren(tableDetails("Show as a table",
+    table(`${ds.map((d) => d.name).join(", ")}: ${mode === "change" ? `change since ${mLabel(firstI)}` : "reported holdings"}, at each December and the latest month`,
+      ["Month", ...series.map((sr) => sr.name)],
+      rows.map(({ p, k }) => [mLabel(p.i), ...series.map((sr) => (has(sr.points[k].v) ? fmt(sr.points[k].v) : "–"))]), { scroll: true })));
+}
+
+/* ---------- Funds: GLD holdings and COMEX futures, loaded in the browser ---------- */
+
+// Just enough of a zip reader for an .xlsx file: the central directory, then each entry inflated
+// with the browser's own DecompressionStream ("deflate-raw").
+function zipEntries(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), dec = new TextDecoder();
+  let e = buf.byteLength - 22;
+  while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error("not a zip file");
+  const n = dv.getUint16(e + 10, true);
+  let p = dv.getUint32(e + 16, true);
+  const out = new Map();
+  for (let k = 0; k < n; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("damaged zip directory");
+    const method = dv.getUint16(p + 10, true), size = dv.getUint32(p + 20, true);
+    const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    const at = dv.getUint32(p + 42, true);
+    out.set(dec.decode(u8.subarray(p + 46, p + 46 + nl)), () => {
+      const start = at + 30 + dv.getUint16(at + 26, true) + dv.getUint16(at + 28, true);
+      const data = u8.subarray(start, start + size);
+      if (method === 0) return Promise.resolve(dec.decode(data));
+      if (method !== 8) throw new Error(`unsupported zip method ${method}`);
+      return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+    });
+    p += 46 + nl + xl + cl;
+  }
+  return out;
+}
+const xmlText = (x) => x.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+  .replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+const MON = Object.fromEntries("jan feb mar apr may jun jul aug sep oct nov dec".split(" ").map((x, k) => [x, k]));
+function parseDay(x) {
+  const t = String(x ?? "").trim();
+  const mt = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(t);
+  if (mt && mt[2].toLowerCase() in MON) return Date.UTC(Number(mt[3]), MON[mt[2].toLowerCase()], Number(mt[1]));
+  const n = Number(t); // an Excel date serial, in case the archive switches to real dates
+  return /^\d{5}(\.\d+)?$/.test(t) && n > 30000 && n < 80000 ? Math.round((n - 25569) * DAY_MS) : null;
+}
+
+// The GLD archive: a sheet with one row per trading day; the columns are found by their header
+// ("Date", "Tonnes of Gold"), not by position. -> [{t, v}] in tonnes, oldest first.
+async function readGLD(buf) {
+  const zip = zipEntries(buf);
+  const shared = zip.has("xl/sharedStrings.xml")
+    ? [...(await zip.get("xl/sharedStrings.xml")()).matchAll(/<si>([\s\S]*?)<\/si>/g)].map((x) => xmlText(x[1])) : [];
+  for (const [name, read] of zip) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) continue;
+    const xml = await read();
+    let cols = null;
+    const rows = [];
+    for (const row of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+      const cells = {};
+      for (const c of row[1].matchAll(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+        const [, col, attrs, inner = ""] = c;
+        let v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
+        if (/\bt="s"/.test(attrs) && v !== undefined) v = shared[Number(v)];
+        else if (/\bt="inlineStr"/.test(attrs)) v = xmlText(inner);
+        if (v !== undefined) cells[col] = v;
+      }
+      if (!cols) {
+        const e = Object.entries(cells);
+        const date = e.find(([, t]) => /^date$/i.test(String(t).trim()));
+        const tn = e.find(([, t]) => /^tonnes/i.test(String(t).trim()));
+        if (date && tn) cols = { date: date[0], t: tn[0] };
+        continue;
+      }
+      const t = parseDay(cells[cols.date]), v = Number(cells[cols.t]);
+      if (t !== null && Number.isFinite(v) && v > 0) rows.push({ t, v });
+    }
+    if (rows.length > 100) return rows.sort((a, b) => a.t - b.t);
+  }
+  throw new Error("no sheet with a Date and a Tonnes column");
+}
+
+function readCFTC(rows) {
+  const num = (x) => Number(x);
+  return rows.map((r) => ({
+    t: Date.parse(`${String(r.report_date_as_yyyy_mm_dd).slice(0, 10)}T00:00:00Z`),
+    oi: num(r.open_interest_all),
+    mm: num(r.m_money_positions_long_all) - num(r.m_money_positions_short_all),
+    sd: num(r.swap_positions_long_all) - num(r.swap__positions_short_all),
+    pm: num(r.prod_merc_positions_long) - num(r.prod_merc_positions_short),
+  })).filter((w) => Number.isFinite(w.t) && [w.oi, w.mm, w.sd, w.pm].every(Number.isFinite)).sort((a, b) => a.t - b.t);
+}
+
+// The latest row at or before time t (rows sorted by t).
+function rowAt(rows, t) {
+  let lo = 0, hi = rows.length - 1, best = null;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (rows[mid].t <= t) { best = rows[mid]; lo = mid + 1; } else hi = mid - 1; }
+  return best;
+}
+// One point per week (the week's last row), for long ranges.
+function weekly(rows) {
+  const out = [];
+  for (const r of rows) {
+    const wk = Math.floor((r.t / DAY_MS + 3) / 7); // weeks from Monday
+    if (out.length && out.at(-1).wk === wk) out[out.length - 1] = { ...r, wk }; else out.push({ ...r, wk });
+  }
+  return out;
+}
+const sinceYears = (rows, years) => (years ? rows.filter((r) => r.t > rows.at(-1).t - years * 365.25 * DAY_MS) : rows);
+
+function renderGLD(rows, years) {
+  const last = rows.at(-1);
+  const back = (days) => rowAt(rows, last.t - days * DAY_MS);
+  const m1 = back(30), y1 = back(365), ytd = rowAt(rows, Date.UTC(new Date(last.t).getUTCFullYear(), 0, 1) - 1);
+  const peak = rows.reduce((a, r) => (r.v >= a.v ? r : a), rows[0]);
+  put("gld-stats",
+    dstat("Holds", tonnes(last.v), DAY.format(last.t)),
+    m1 ? dstat("1 month", sv(last.v - m1.v), `since ${DAY.format(m1.t)}`) : null,
+    ytd ? dstat("This year", sv(last.v - ytd.v), `since ${DAY.format(ytd.t)}`) : null,
+    y1 ? dstat("12 months", sv(last.v - y1.v), `since ${DAY.format(y1.t)}`) : null,
+    dstat("Peak", tonnes(peak.v), DAY.format(peak.t)));
+  const shown = years === 1 ? sinceYears(rows, 1) : weekly(sinceYears(rows, years));
+  const step = years === 1 ? "previous day" : "previous week";
+  lineChart($("chart-gld"), {
+    points: shown.map((r, k) => ({ i: dayIdx(r.t), v: r.v, t: r.t, prev: shown[k - 1]?.v })),
+    height: 240,
+    zero: years === 0, // the full history starts near zero anyway; 1Y and 5Y zoom in
+    endLabel: (p) => tonnes(p.v),
+    tipTitle: (p) => DAY.format(p.t),
+    label: `Line chart of gold held by the SPDR Gold Trust, ${DAY.format(shown[0].t)} to ${DAY.format(last.t)}. Latest ${tonnes(last.v)}.`,
+    tipRows: (p) => [{ value: tonnes(p.v), label: "in the trust", key: "line" },
+      ...(has(p.prev) ? [{ value: signed(p.v - p.prev), label: `vs ${step}` }] : [])],
+  });
+  $("gld-note").textContent = "The largest gold ETF. Its holdings rise when investors buy shares faster than they sell them, and fall the other way: a daily read of Western investment demand. "
+    + "Source: SPDR Gold Shares historical archive, fetched by your browser.";
+}
+
+function renderCFTC(weeks, years) {
+  const last = weeks.at(-1);
+  const toT = (c) => c * CONTRACT_T;
+  const prev4 = rowAt(weeks, last.t - 28 * DAY_MS);
+  const lower = weeks.filter((w) => w.mm < last.mm).length / weeks.length;
+  put("cftc-stats",
+    dstat("Managed money, net long", tonnes(toT(last.mm)), `${NF0.format(last.mm)} contracts · ${DAY.format(last.t)}`),
+    prev4 ? dstat("4 weeks", sv(toT(last.mm - prev4.mm)), `since ${DAY.format(prev4.t)}`) : null,
+    dstat("Versus history", `Higher than ${pct(lower)}`, `of weeks since ${yearOf(dayIdx(weeks[0].t))}`),
+    dstat("Share of open interest", pct1(last.mm / last.oi), `${NF0.format(last.oi)} contracts open`));
+  const shown = sinceYears(weeks, years);
+  const series = [
+    { name: "Managed money (funds)", cls: "", key: "mm" },
+    { name: "Swap dealers (banks)", cls: "s2", key: "sd" },
+    { name: "Producers and merchants", cls: "s3", key: "pm" },
+  ].map((sr) => ({ ...sr, points: shown.map((w) => ({ i: dayIdx(w.t), v: toT(w[sr.key]), t: w.t })) }));
+  $("cftc-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+  multiLineChart($("chart-cftc"), {
+    series,
+    height: 260,
+    tipTitle: (p) => `Week to ${DAY.format(p.t)}`,
+    label: `Line chart of net COMEX gold futures positions in tonnes by trader type, ${DAY.format(shown[0].t)} to ${DAY.format(last.t)}.`,
+  });
+  $("cftc-note").textContent = "Net position = long minus short contracts, converted at 100 troy ounces a contract. Funds (managed money) are usually net long and their swings are the speculative bet; "
+    + "banks and producers mostly sit on the other side. Source: CFTC Commitments of Traders, disaggregated futures only, weekly (Tuesday positions, published Friday).";
+  // The last report of each month, for the table.
+  return shown.filter((w, k, a) => k === a.length - 1 || new Date(w.t).getUTCMonth() !== new Date(a[k + 1].t).getUTCMonth()).reverse();
+}
+
+async function loadFunds() {
+  let gld = null, cftc = null, years = [0, 5, 1].includes(Number(params.get("frange"))) ? Number(params.get("frange")) : 0;
+  const fail = (id, what, err) => { $(id).replaceChildren(h("p", { class: "chart-note error" }, `Couldn't load ${what} (${err.message || err}). The rest of the page doesn't depend on it.`)); };
+  const drawFutures = () => {
+    if (!cftc) return;
+    const rows = renderCFTC(cftc, years);
+    const gAt = (t) => (gld ? rowAt(gld, t) : null);
+    $("table-funds").replaceChildren(tableDetails("Show month ends as a table",
+      table("Month-end GLD holdings and net COMEX futures positions, tonnes", ["Week to", "GLD holdings", "Managed money", "Swap dealers", "Producers and merchants"],
+        rows.map((w) => [DAY.format(w.t), gAt(w.t) ? tonnes(gAt(w.t).v) : "–", signed(w.mm * CONTRACT_T), signed(w.sd * CONTRACT_T), signed(w.pm * CONTRACT_T)]),
+        { scroll: true })));
+  };
+  const draw = () => { if (gld) renderGLD(gld, years); drawFutures(); };
+  wireSeg("funds-range", years, (v) => { years = Number(v); draw(); setParam("frange", v); });
+  const [g, c] = await Promise.allSettled([
+    (async () => {
+      if (typeof DecompressionStream === "undefined") throw new Error("this browser can't unzip the archive");
+      const res = await fetch(GLD_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return readGLD(await res.arrayBuffer());
+    })(),
+    (async () => {
+      const res = await fetch(CFTC_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const w = readCFTC(await res.json());
+      if (w.length < 100) throw new Error(`only ${w.length} weeks`);
+      return w;
+    })(),
+  ]);
+  if (g.status === "fulfilled") gld = g.value; else { fail("chart-gld", "the GLD archive from spdrgoldshares.com", g.reason); put("gld-stats"); }
+  if (c.status === "fulfilled") cftc = c.value; else { fail("chart-cftc", "CFTC data from publicreporting.cftc.gov", c.reason); put("cftc-stats"); }
+  $("funds-sub").textContent = "Market data, not central banks: what investors and traders hold. Loaded by your browser straight from the sources each time the page opens, so it is as fresh as they are and nothing is stored in this repo.";
+  draw();
 }
 
 /* ---------- Boot ---------- */
@@ -1219,9 +1743,10 @@ async function getLog(url) {
 }
 
 async function main() {
-  let raw, rr = null, log = null;
+  let raw, rr = null, log = null, changes = null;
   try {
-    [raw, rr, log] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null), getLog("data/fetch_log.csv").catch(() => null)]);
+    [raw, rr, log, changes] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null),
+      getLog("data/fetch_log.csv").catch(() => null), getJSON(CHANGES_URL).catch(() => null)]);
   } catch (err) {
     const f = $("ticker");
     f.textContent = `Couldn't load ${DATA_URL} (${err.message}). If you opened this file directly, serve the folder over HTTP instead.`;
@@ -1234,10 +1759,11 @@ async function main() {
   renderHero(m);
   renderStatGroups(m, r, log);
   renderFreshness(m);
-  renderRolling(m);
-  wireTrendRange(m);
+  renderRolling(m, r);
+  wireTrendRange(m, r);
   renderYears(m);
   renderMonthly(m);
+  renderUpdates(changes);
   renderWho(m);
   renderGroups(m);
 
@@ -1245,20 +1771,28 @@ async function main() {
   for (const d of m.holders.slice().sort((a, b) => b.latest - a.latest)) {
     sel.append(h("option", { value: d.code }, `${d.name} · ${tonnes(d.latest)}`));
   }
+  const topBuyer = m.byCountry.slice().sort((a, b) => b.v - a.v)[0];
+  const defaultHolder = topBuyer ? topBuyer.d.code : "USA";
   const select = (code, scroll) => {
     sel.value = code;
     renderCountry(m, r, code);
+    setParam("holder", code === defaultHolder ? null : code);
     if (scroll) $("country").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   };
   sel.addEventListener("change", () => select(sel.value, false));
   renderMomentum(m, select);
+  renderBreadth(m);
   if (r && r.worldSeries.length) renderShare(m, r);
   else $("reserves").hidden = true;
   renderBoard(m, r, select);
-  const topBuyer = m.byCountry.slice().sort((a, b) => b.v - a.v)[0];
-  select(topBuyer ? topBuyer.d.code : "USA", false);
+  const asked = params.get("holder");
+  select(m.holders.some((d) => d.code === asked) ? asked : defaultHolder, false);
+  setupCompare(m);
   renderNotes(m, r);
   scrollSpy();
+  // A shared link with #section: the page was empty when the browser tried to jump there.
+  if (location.hash && $(location.hash.slice(1))) $(location.hash.slice(1)).scrollIntoView();
+  loadFunds(); // last, and not awaited: third-party data must never hold up the IMF sections
 }
 
 main();

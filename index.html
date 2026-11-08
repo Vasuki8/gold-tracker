@@ -29,12 +29,16 @@
         <a href="#trend">Trend</a>
         <a href="#years">Years</a>
         <a href="#months">Months</a>
+        <a href="#updates">Updates</a>
         <a href="#who">Who</a>
         <a href="#groups">Groups</a>
         <a href="#momentum">Momentum</a>
+        <a href="#breadth">Breadth</a>
         <a href="#reserves">Reserves</a>
         <a href="#board">Holders</a>
         <a href="#country">Holder</a>
+        <a href="#compare">Compare</a>
+        <a href="#funds">Funds</a>
         <a href="#method">Method</a>
       </nav>
     </div>
@@ -56,14 +60,19 @@
         <div class="panel-head">
           <h2 id="trend-h">Net buying · rolling 12 months</h2>
           <div class="seg" id="trend-range" role="group" aria-label="Time range">
-            <button type="button" data-years="0" aria-pressed="true">All</button>
-            <button type="button" data-years="10" aria-pressed="false">10Y</button>
-            <button type="button" data-years="5" aria-pressed="false">5Y</button>
+            <button type="button" data-v="0" aria-pressed="true">All</button>
+            <button type="button" data-v="10" aria-pressed="false">10Y</button>
+            <button type="button" data-v="5" aria-pressed="false">5Y</button>
           </div>
         </div>
         <p class="sub">Sum of all reported changes in the 12 months up to each point. Above zero: central banks were adding gold overall. Numbered markers are explained below the chart.</p>
         <div class="chart" id="chart-rolling"></div>
         <ol class="marks-key" id="marks-key"></ol>
+        <div id="trend-price">
+          <h3 class="h3">Gold price over the same months</h3>
+          <p class="sub small">Implied by the IMF data (median US dollars per ounce across reporting holders), lined up with the chart above. A separate chart, not a second axis: compare the shapes, not the heights.</p>
+          <div class="chart" id="chart-trend-price"></div>
+        </div>
         <div id="table-rolling"></div>
       </section>
 
@@ -80,6 +89,12 @@
         <p class="sub" id="monthly-sub">Net reported change each month, all holders together.</p>
         <div class="chart" id="chart-monthly"></div>
         <div id="table-monthly"></div>
+      </section>
+
+      <section class="card" id="updates" aria-labelledby="updates-h">
+        <h2 id="updates-h">Updates from the IMF</h2>
+        <p class="sub" id="updates-sub"></p>
+        <div id="updates-list"></div>
       </section>
 
       <section class="card" id="who" aria-labelledby="who-h">
@@ -107,11 +122,27 @@
         <div id="momentum-table"></div>
       </section>
 
+      <section class="card" id="breadth" aria-labelledby="breadth-h">
+        <h2 id="breadth-h">How broad is the buying</h2>
+        <p class="sub" id="breadth-sub"></p>
+        <div class="legend" id="breadth-legend"></div>
+        <div class="chart" id="chart-breadth"></div>
+        <h3 class="h3">Concentration: the two biggest buyers' share</h3>
+        <p class="sub small" id="concentration-sub"></p>
+        <div class="chart" id="chart-concentration"></div>
+        <div id="table-breadth"></div>
+      </section>
+
       <section class="card" id="reserves" aria-labelledby="reserves-h">
         <h2 id="reserves-h">Gold as a share of reserves</h2>
         <p class="sub" id="reserves-sub"></p>
         <div class="chart" id="chart-share"></div>
         <div id="table-share"></div>
+        <h3 class="h3">Gold and everything else in reserves</h3>
+        <p class="sub small" id="mix-sub"></p>
+        <div class="legend" id="mix-legend"></div>
+        <div class="chart" id="chart-mix"></div>
+        <div id="table-mix"></div>
         <div class="split charts">
           <div>
             <h3 class="h3">Largest holders: gold as % of their reserves</h3>
@@ -153,6 +184,51 @@
         <div id="table-country"></div>
       </section>
 
+      <section class="card" id="compare" aria-labelledby="compare-h">
+        <h2 id="compare-h">Compare holders</h2>
+        <div class="controls">
+          <label for="cmp-a">Holders</label>
+          <select id="cmp-a" aria-label="First holder"></select>
+          <select id="cmp-b" aria-label="Second holder"></select>
+          <select id="cmp-c" aria-label="Third holder"></select>
+          <div class="seg" id="cmp-mode" role="group" aria-label="Show">
+            <button type="button" data-v="held" aria-pressed="true">Holdings</button>
+            <button type="button" data-v="change" aria-pressed="false">Change</button>
+          </div>
+          <div class="seg" id="cmp-range" role="group" aria-label="Time range">
+            <button type="button" data-v="0" aria-pressed="true">All</button>
+            <button type="button" data-v="10" aria-pressed="false">10Y</button>
+            <button type="button" data-v="5" aria-pressed="false">5Y</button>
+          </div>
+        </div>
+        <p class="sub" id="cmp-sub"></p>
+        <div class="legend" id="cmp-legend"></div>
+        <div class="chart" id="chart-compare"></div>
+        <div id="table-compare"></div>
+      </section>
+
+      <section class="card" id="funds" aria-labelledby="funds-h">
+        <div class="panel-head">
+          <h2 id="funds-h">Funds: ETF holdings and futures bets</h2>
+          <div class="seg" id="funds-range" role="group" aria-label="Time range">
+            <button type="button" data-v="0" aria-pressed="true">All</button>
+            <button type="button" data-v="5" aria-pressed="false">5Y</button>
+            <button type="button" data-v="1" aria-pressed="false">1Y</button>
+          </div>
+        </div>
+        <p class="sub" id="funds-sub">Loading market data from SPDR Gold Shares and the CFTC…</p>
+        <h3 class="h3">Gold held by the SPDR Gold Trust (GLD)</h3>
+        <dl class="stats" id="gld-stats"></dl>
+        <div class="chart" id="chart-gld"></div>
+        <p class="chart-note" id="gld-note"></p>
+        <h3 class="h3">COMEX gold futures: net position by trader type</h3>
+        <dl class="stats" id="cftc-stats"></dl>
+        <div class="legend" id="cftc-legend"></div>
+        <div class="chart" id="chart-cftc"></div>
+        <p class="chart-note" id="cftc-note"></p>
+        <div id="table-funds"></div>
+      </section>
+
       <section class="card notes" id="method" aria-labelledby="notes-h">
         <h2 id="notes-h">How the numbers are made</h2>
         <div id="notes"></div>
@@ -160,7 +236,7 @@
     </main>
 
     <footer class="page-foot" id="foot">
-      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>). A personal project, not investment advice.</p>
+      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>, <a href="data/changes.json">changes</a>). Funds panel: <a href="https://www.spdrgoldshares.com/usa/historical-data/">SPDR Gold Shares</a> and <a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm">CFTC Commitments of Traders</a>, loaded by your browser. A personal project, not investment advice.</p>
     </footer>
   </div>
 </body>

@@ -2,7 +2,9 @@
    Sans, small uppercase labels, emerald/red for up/down.
    Chart mark colors were checked with the dataviz palette validator against the panel surface
    (#0a0a0a, dark mode): buy #059669 vs sell #ef4444 (CVD ΔE 9.6), line #3b82f6 vs second series
-   #d97706 (ΔE 30.2). Text deltas use the brighter 400 steps and always carry ▲/▼ and a sign. */
+   #d97706 (ΔE 30.2); with a third series, aqua #199e70, all three pairs pass (worst CVD ΔE 9.0).
+   A fourth color fails, so multi-series charts stop at three. Text deltas use the brighter 400
+   steps and always carry ▲/▼ and a sign. */
 :root {
   color-scheme: dark;
   --page: #000000;
@@ -26,6 +28,7 @@
   --sell: #ef4444;       /* marks: selling */
   --line: #3b82f6;       /* marks: main series */
   --s2: #d97706;         /* marks: second series */
+  --s3: #199e70;         /* marks: third series */
   --wash: rgba(59, 130, 246, 0.12);
   --wash-s2: rgba(217, 119, 6, 0.12);
   --band: rgba(255, 255, 255, 0.03);
@@ -166,10 +169,16 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .baseline { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
 .line { fill: none; stroke: var(--line); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .line.s2 { stroke: var(--s2); }
+.line.s3 { stroke: var(--s3); }
+.line.buy { stroke: var(--buy); }
+.line.sell { stroke: var(--sell); }
 .area { fill: var(--wash); stroke: none; }
 .area.s2 { fill: var(--wash-s2); }
 .dot { fill: var(--line); stroke: var(--surface); stroke-width: 2; }
 .dot.s2 { fill: var(--s2); }
+.dot.s3 { fill: var(--s3); }
+.dot.buy { fill: var(--buy); }
+.dot.sell { fill: var(--sell); }
 .cross { stroke: #3a3a3a; stroke-width: 1; shape-rendering: crispEdges; }
 .bar.buy { fill: var(--buy); }
 .bar.sell { fill: var(--sell); }
@@ -192,6 +201,9 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; background: var(--line); }
 .legend i.s2 { background: var(--s2); }
+.legend i.s3 { background: var(--s3); }
+.legend i.buy { background: var(--buy); }
+.legend i.sell { background: var(--sell); }
 
 .marks-key { margin: 10px 0 0; padding-left: 0; list-style: none; display: grid; gap: 3px; font-size: 12px; color: var(--ink-2); }
 .marks-key li { display: flex; gap: 8px; align-items: baseline; }
@@ -211,6 +223,7 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .tt-key.buy { background: var(--buy); }
 .tt-key.sell { background: var(--sell); }
 .tt-key.s2 { background: var(--s2); }
+.tt-key.s3 { background: var(--s3); }
 .tt-sep { border-top: 1px solid var(--border-2); margin: 6px 0 4px; }
 
 /* ---- Tables ---- */
@@ -236,6 +249,20 @@ td.flag { color: var(--ink); }
 details.data-table { margin-top: 12px; }
 details.data-table summary { cursor: pointer; color: var(--ink-2); font-size: 12px; font-weight: 600; width: fit-content; }
 details.data-table summary:hover { color: var(--ink); }
+.csv-btn {
+  margin-top: 10px; font: 600 12px/1 var(--font); color: var(--ink-2); background: transparent; cursor: pointer;
+  border: 1px solid var(--border-2); border-radius: 6px; padding: 7px 11px;
+}
+.csv-btn:hover { color: var(--ink); border-color: var(--ink-2); }
+.chart-note.error { color: var(--down); }
+
+/* ---- Updates feed ---- */
+.split.updates { margin-top: 4px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.update h3 { font-size: 11px; }
+.update-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 6px; }
+.list-card .update-gauge, .list-card .update-more { margin: 0 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.list-card .update-more { margin: 6px 0 0; }
+.update li > span:first-child { color: var(--ink); }
 
 /* ---- Controls ---- */
 .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 12px; }
@@ -280,4 +307,6 @@ select {
   .hero-aside { justify-items: start; }
   .hero-value { font-size: 40px; }
   th, td { padding: 7px 8px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats dd { font-size: 15.5px; }
 }

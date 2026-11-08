@@ -1,8 +1,9 @@
 # Daily fetch of IMF IRFCL data: gold volumes (the two-week reliability test, then the v1 data
 # feed) and, as a separate step with its own log, reserves in US dollars (gold's share of
 # reserves). Every run appends a row to each log. Each data file is committed only when its own
-# step passed and the IMF data actually changed. A failed step fails the job, so GitHub emails
-# the repo owner.
+# step passed and the IMF data actually changed. When the gold data changed, spike/changes.py
+# records what changed (data/changes.json) and opens a GitHub issue if the news is worth an
+# alert. A failed step fails the job, so GitHub emails the repo owner.
 name: Fetch IMF gold reserves
 
 on:
@@ -12,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  issues: write # alerts
 
 concurrency:
   group: fetch-irfcl
@@ -33,6 +35,16 @@ jobs:
         id: reserves
         continue-on-error: true
         run: python3 spike/fetch_reserves.py --out data --log data/fetch_log_reserves.csv
+
+      - name: Record what changed, and open an alert issue if it matters
+        id: changes
+        if: steps.fetch.outcome == 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git show HEAD:data/gold_tonnes.json > "$RUNNER_TEMP/gold_prev.json"
+          python3 spike/changes.py --old "$RUNNER_TEMP/gold_prev.json" --new data/gold_tonnes.json --log data/changes.json --issue
 
       - name: Keep the raw IMF responses for 30 days
         if: always()
@@ -61,6 +73,7 @@ jobs:
           keep_or_drop "$RESERVES_OUTCOME" data/reserves_usd.json
           git add data/fetch_log.csv
           if [ -f data/fetch_log_reserves.csv ]; then git add data/fetch_log_reserves.csv; fi
+          if [ -f data/changes.json ]; then git add data/changes.json; fi
           changed=""
           git diff --cached --quiet -- data/gold_tonnes.json || changed="gold"
           git diff --cached --quiet -- data/reserves_usd.json || changed="${changed:+$changed + }reserves"
@@ -74,11 +87,12 @@ jobs:
           git pull --rebase --quiet origin "$GITHUB_REF_NAME"
           git push origin "HEAD:$GITHUB_REF_NAME"
 
-      - name: Fail the run if a fetch failed
-        if: steps.fetch.outcome != 'success' || steps.reserves.outcome != 'success'
+      - name: Fail the run if a step failed
+        if: steps.fetch.outcome != 'success' || steps.reserves.outcome != 'success' || steps.changes.outcome == 'failure'
         env:
           FETCH_OUTCOME: ${{ steps.fetch.outcome }}
           RESERVES_OUTCOME: ${{ steps.reserves.outcome }}
+          CHANGES_OUTCOME: ${{ steps.changes.outcome }}
         run: |
-          echo "::error::Gold volumes: $FETCH_OUTCOME. Reserves: $RESERVES_OUTCOME. See the fetch step logs."
+          echo "::error::Gold volumes: $FETCH_OUTCOME. Reserves: $RESERVES_OUTCOME. Changes and alert: $CHANGES_OUTCOME. See the step logs."
           exit 1
