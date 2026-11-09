@@ -24,29 +24,78 @@
           <span class="brand-tag">Official reserves · IMF IRFCL · daily</span>
         </span>
       </a>
-      <nav class="tabs" aria-label="Sections">
-        <a href="#gauge">Overview</a>
-        <a href="#trend">Trend</a>
-        <a href="#journal">Journal</a>
-        <a href="#unreported">Unreported</a>
-        <a href="#years">Years</a>
-        <a href="#supply">Supply</a>
-        <a href="#months">Months</a>
-        <a href="#price">Price</a>
-        <a href="#updates">Updates</a>
-        <a href="#quality">Quality</a>
-        <a href="#who">Who</a>
-        <a href="#groups">Groups</a>
-        <a href="#momentum">Momentum</a>
-        <a href="#breadth">Breadth</a>
-        <a href="#reserves">Reserves</a>
-        <a href="#dollar">Dollar</a>
-        <a href="#board">Holders</a>
-        <a href="#country">Holder</a>
-        <a href="#compare">Compare</a>
-        <a href="#funds">Funds</a>
-        <a href="#method">Method</a>
-      </nav>
+      <!-- The tab row scrolls sideways (21 sections never fit); the arrows and the edge fades are
+           driven by scrollSpy() in app.js, which also maps the mouse wheel onto the row. -->
+      <div class="tabs-wrap" id="tabs-wrap">
+        <button type="button" class="tabs-arrow prev" data-dir="-1" aria-hidden="true" tabindex="-1">&#8249;</button>
+        <nav class="tabs" aria-label="Sections">
+          <a href="#gauge">Overview</a>
+          <a href="#trend">Trend</a>
+          <a href="#journal">Journal</a>
+          <a href="#unreported">Unreported</a>
+          <a href="#years">Years</a>
+          <a href="#supply">Supply</a>
+          <a href="#months">Months</a>
+          <a href="#price">Price</a>
+          <a href="#updates">Updates</a>
+          <a href="#quality">Quality</a>
+          <a href="#who">Who</a>
+          <a href="#groups">Groups</a>
+          <a href="#momentum">Momentum</a>
+          <a href="#breadth">Breadth</a>
+          <a href="#reserves">Reserves</a>
+          <a href="#dollar">Dollar</a>
+          <a href="#board">Holders</a>
+          <a href="#country">Holder</a>
+          <a href="#compare">Compare</a>
+          <a href="#funds">Funds</a>
+          <a href="#method">Method</a>
+        </nav>
+        <button type="button" class="tabs-arrow next" data-dir="1" aria-hidden="true" tabindex="-1">&#8250;</button>
+      </div>
+      <!-- Every section in one place, grouped by what it answers. On a phone the tab row is hidden
+           and this button shows the section in view instead. Native popover: Escape and a click
+           outside close it. -->
+      <button type="button" class="menu-btn" id="sections-btn" popovertarget="sections-menu" aria-expanded="false" aria-label="All sections">
+        <span class="menu-current" id="menu-current">Overview</span>
+        <span class="menu-word">Sections</span>
+        <svg class="menu-chev" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="menu" id="sections-menu" popover aria-label="All sections">
+        <div class="menu-group">
+          <h3>Pace</h3>
+          <a href="#gauge">Overview<small>Headline numbers: 3 and 12 months, speeding up or slowing</small></a>
+          <a href="#trend">Trend<small>Rolling 12-month net buying since 2000, with the price</small></a>
+          <a href="#years">Years<small>Net change per calendar year</small></a>
+          <a href="#months">Months<small>Monthly bars, buyers and sellers each month</small></a>
+          <a href="#price">Price<small>Buying against price moves, seasonality</small></a>
+          <a href="#journal">Journal<small>Your trigger line and decision notes</small></a>
+          <a href="#unreported">Unreported<small>WGC's estimate of all buying vs what is reported</small></a>
+        </div>
+        <div class="menu-group">
+          <h3>Who</h3>
+          <a href="#who">Who<small>Buyers and sellers over 12 months, concentration</small></a>
+          <a href="#groups">Groups<small>Emerging vs advanced economies, regions</small></a>
+          <a href="#momentum">Momentum<small>Streaks, who started and who stopped</small></a>
+          <a href="#breadth">Breadth<small>How many holders are adding vs cutting</small></a>
+          <a href="#board">Holders<small>The largest reported holdings, ranked</small></a>
+          <a href="#country">Holder<small>One holder in depth</small></a>
+          <a href="#compare">Compare<small>Up to three holders side by side</small></a>
+        </div>
+        <div class="menu-group">
+          <h3>Context</h3>
+          <a href="#reserves">Reserves<small>Gold as a share of total reserves, implied price</small></a>
+          <a href="#dollar">Dollar<small>Foreign holdings of Treasuries, reserve currencies</small></a>
+          <a href="#supply">Supply<small>Mine production against reported buying</small></a>
+          <a href="#funds">Funds<small>GLD holdings and COMEX futures positioning</small></a>
+        </div>
+        <div class="menu-group">
+          <h3>Data</h3>
+          <a href="#updates">Updates<small>What changed in the IMF data, and when</small></a>
+          <a href="#quality">Quality<small>Revisions and who is late reporting</small></a>
+          <a href="#method">Method<small>How the numbers are made, sources, logs</small></a>
+        </div>
+      </div>
     </div>
   </header>
 

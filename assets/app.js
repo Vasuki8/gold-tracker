@@ -1086,23 +1086,75 @@ function wireTrendRange(m, r) {
   wireSeg("trend-range", years, (v) => { renderRolling(m, r, Number(v)); setParam("range", v); });
 }
 
-// Highlight the header tab of the section in view, and keep it visible in the scrolling tab row.
+// The header: highlight the tab and menu entry of the section in view, keep that tab visible in the
+// scrolling row, show arrows and fades where the row has more tabs, let the mouse wheel scroll the
+// row, and place the Sections menu under its button.
 function scrollSpy() {
-  const nav = document.querySelector(".tabs");
-  const links = [...nav.querySelectorAll("a")];
-  const byId = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const a = byId.get(e.target.id);
-      if (!a) continue;
-      for (const x of links) x.removeAttribute("aria-current");
-      a.setAttribute("aria-current", "true");
-      // offsetLeft is measured from the sticky header, so subtract the tab row's own offset.
-      nav.scrollTo({ left: a.offsetLeft - nav.offsetLeft - nav.clientWidth / 2 + a.clientWidth / 2, behavior: "auto" });
+  const wrap = $("tabs-wrap");
+  const nav = wrap.querySelector(".tabs");
+  const menu = $("sections-menu");
+  const btn = $("sections-btn");
+  const tabs = [...nav.querySelectorAll("a")];
+  const ids = tabs.map((a) => a.getAttribute("href").slice(1));
+  const links = [...tabs, ...menu.querySelectorAll("a")];
+  const instant = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Which sides of the row still have tabs: data-more="start end" drives the fades and arrows.
+  const edges = () => {
+    const more = [];
+    if (nav.scrollLeft > 1) more.push("start");
+    if (nav.scrollLeft < nav.scrollWidth - nav.clientWidth - 1) more.push("end");
+    wrap.dataset.more = more.join(" ");
+  };
+  nav.addEventListener("scroll", edges, { passive: true });
+  addEventListener("resize", edges);
+  document.fonts?.ready.then(edges); // tab widths change when the web font arrives
+  edges();
+  // A mouse wheel scrolls vertically; over the row that would scroll the page, so turn it sideways.
+  // A real horizontal gesture (trackpad, shift+wheel) is left to the browser.
+  nav.addEventListener("wheel", (ev) => {
+    if (nav.scrollWidth <= nav.clientWidth || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+    ev.preventDefault();
+    nav.scrollBy({ left: ev.deltaY * (ev.deltaMode === 1 ? 16 : 1), behavior: "auto" });
+  }, { passive: false });
+  for (const arrow of wrap.querySelectorAll(".tabs-arrow")) {
+    arrow.addEventListener("click", () => nav.scrollBy({ left: Number(arrow.dataset.dir) * nav.clientWidth * 0.7, behavior: instant() ? "auto" : "smooth" }));
+  }
+
+  // The menu is a native popover (top layer, Escape and outside clicks close it); it only needs
+  // placing under its button, and closing when a section is picked.
+  menu.addEventListener("toggle", (ev) => {
+    const open = ev.newState === "open";
+    btn.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    const b = btn.getBoundingClientRect();
+    menu.style.top = `${Math.round(b.bottom + 6)}px`;
+    menu.style.right = `${Math.max(12, Math.round(document.documentElement.clientWidth - b.right))}px`;
+  });
+  menu.addEventListener("click", (ev) => { if (ev.target.closest("a")) menu.hidePopover(); });
+
+  // Of the sections inside the band near the top of the viewport, the first in page order is the
+  // one being read. A set, not the last entry: the observer only reports crossings, so a section
+  // that stays in the band must not be forgotten when a neighbour leaves it.
+  let current = null;
+  const inBand = new Set();
+  const activate = (id) => {
+    if (id === current) return;
+    current = id;
+    for (const a of links) {
+      if (a.getAttribute("href") === `#${id}`) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
     }
+    const tab = tabs[ids.indexOf(id)];
+    $("menu-current").textContent = tab.textContent;
+    // Centre the tab in the row, unless the pointer is on the row: then the reader is browsing it.
+    if (!nav.matches(":hover")) nav.scrollTo({ left: tab.offsetLeft - (nav.clientWidth - tab.offsetWidth) / 2, behavior: "auto" });
+  };
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) { if (e.isIntersecting) inBand.add(e.target.id); else inBand.delete(e.target.id); }
+    const first = ids.find((id) => inBand.has(id));
+    if (first) activate(first);
   }, { rootMargin: "-80px 0px -65% 0px" });
-  for (const id of byId.keys()) { const sec = $(id); if (sec) io.observe(sec); }
+  for (const id of ids) { const sec = $(id); if (sec) io.observe(sec); }
 }
 
 function yearTitle(y) { return y.partial ? `${y.i} (${mRange(y.a, y.b)}, so far)` : String(y.i); }
@@ -2441,9 +2493,15 @@ async function main() {
   renderNotes(m, r);
   scrollSpy();
   // A shared link with #section: the page was empty when the browser tried to jump there.
-  if (location.hash && $(location.hash.slice(1))) $(location.hash.slice(1)).scrollIntoView();
-  loadProduction(m, r); // these two last, and not awaited: other sources must never hold up the IMF sections
-  loadFunds();
+  const target = location.hash && $(location.hash.slice(1));
+  if (target) target.scrollIntoView();
+  const jumpedTo = scrollY;
+  // These two last, and not awaited: other sources must never hold up the IMF sections. They add
+  // over a thousand pixels above the later sections when they land, so a reader who jumped to
+  // #section and hasn't scrolled since is put back on it.
+  Promise.allSettled([loadProduction(m, r), loadFunds()]).then(() => {
+    if (target && Math.abs(scrollY - jumpedTo) < 2) target.scrollIntoView();
+  });
 }
 
 main();
