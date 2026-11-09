@@ -127,12 +127,14 @@ a:hover { text-decoration: underline; }
 
 .wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px 56px; }
 
-/* ---- Ticker strip ---- */
-.ticker { margin: 16px 0 12px; font-size: 15px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.ticker strong { color: var(--ink); font-weight: 700; }
-.ticker .sep { color: var(--muted); margin: 0 6px; }
+/* ---- Status, latest update, freshness ---- */
+/* The status line shows "Loading…" or a load error, and hides once the data is in. */
+.status { margin: 16px 0 12px; font-size: 14px; color: var(--ink-2); }
+.latest { margin: 12px 2px 0; font-size: 13px; color: var(--ink-2); max-width: 110ch; font-variant-numeric: tabular-nums; }
+.latest strong { color: var(--ink); font-weight: 600; }
 .freshness { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
-.freshness.error, .ticker.error { color: var(--down); }
+.freshness.error, .status.error { color: var(--down); }
+main { padding-top: 4px; }
 
 /* ---- Panels ---- */
 .card {
@@ -354,8 +356,42 @@ select {
 .stats dd { margin: 3px 0 0; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .stats dd small { display: block; font-weight: 400; color: var(--ink-2); font-size: 11.5px; letter-spacing: 0; }
 
-/* ---- Notes, footer ---- */
-.notes h3 { margin: 18px 0 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+/* ---- Folded sections (Reserves, Dollar, Supply, Funds) ---- */
+/* The summary is the section's heading plus one line; the chevron turns when it opens. */
+details.fold > summary {
+  list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; align-items: center;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary h2 { grid-column: 1; margin: 0; }
+.fold-sum { grid-column: 1; margin-top: 3px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.fold-sum .pos, .fold-sum .neg { white-space: nowrap; } /* keep an arrow with its number */
+.fold-chev {
+  grid-column: 2; grid-row: 1 / span 2; display: grid; place-items: center;
+  width: 30px; height: 30px; border: 1px solid var(--border-2); border-radius: 50%;
+}
+.fold-chev::before {
+  content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--ink-2); border-bottom: 1.6px solid var(--ink-2);
+  transform: translateY(-2px) rotate(45deg); transition: transform 0.15s ease;
+}
+details.fold[open] .fold-chev::before { transform: translateY(2px) rotate(-135deg); }
+details.fold > summary:hover .fold-chev { border-color: var(--ink-2); }
+details.fold[open] > summary { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fold-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+@media (prefers-reduced-motion: reduce) { .fold-chev::before { transition: none; } }
+
+/* ---- Notes (Method: one closed entry per topic), footer ---- */
+.notes details.note { border-top: 1px solid var(--border); }
+.notes details.note:last-child { border-bottom: 1px solid var(--border); }
+.notes details.note > summary {
+  list-style: none; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; padding: 10px 2px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2);
+}
+.notes details.note > summary::-webkit-details-marker { display: none; }
+.notes details.note > summary::after { content: "+"; font-size: 14px; letter-spacing: 0; line-height: 1; }
+.notes details.note[open] > summary { color: var(--ink); }
+.notes details.note[open] > summary::after { content: "\2212"; }
+.notes details.note > summary:hover { color: var(--ink); }
+.notes details.note > :last-child { margin-bottom: 12px; }
 .notes p, .notes li { color: var(--ink-2); font-size: 13px; max-width: 90ch; }
 .notes p { margin: 0 0 8px; }
 .notes ul { margin: 0 0 8px; padding-left: 18px; }
@@ -364,7 +400,7 @@ select {
 @media (max-width: 720px) {
   .bar { padding: 0 12px; gap: 12px; }
   .brand-tag { display: none; }
-  /* Two and a half tabs out of 21 is no use on a phone: the row goes, and the Sections button
+  /* Two and a half tabs out of 19 is no use on a phone: the row goes, and the Sections button
      becomes a "current section" dropdown, like a select. */
   .tabs-wrap { display: none; }
   .menu-btn { flex: 1 1 auto; min-width: 0; justify-content: space-between; }
