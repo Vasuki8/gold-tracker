@@ -4,7 +4,10 @@
    (#0a0a0a, dark mode): buy #059669 vs sell #ef4444 (CVD ΔE 9.6), line #3b82f6 vs second series
    #d97706 (ΔE 30.2); with a third series, aqua #199e70, all three pairs pass (worst CVD ΔE 9.0).
    A fourth color fails, so multi-series charts stop at three. Text deltas use the brighter 400
-   steps and always carry ▲/▼ and a sign. */
+   steps and always carry ▲/▼ and a sign.
+   Layout rule: space follows importance. The gauge and the trend fill the first screen; signal
+   quality (who, breadth, momentum) the second; detail sits in half-width cards; context and
+   reference open from one row of tiles each. */
 :root {
   color-scheme: dark;
   --page: #000000;
@@ -35,19 +38,20 @@
   --spark: #4b5563;
   --track: #1e3a5f;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-  --radius: 12px;
+  --radius: 10px;
+  --gap: 12px;
   --font: "IBM Plex Sans", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   accent-color: var(--line);
   scrollbar-color: #2a2a2a var(--page);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-padding-top: 72px; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 68px; }
 body {
   margin: 0;
   background: var(--page);
   color: var(--ink);
-  font: 400 14px/1.55 var(--font);
+  font: 400 14px/1.5 var(--font);
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
@@ -64,16 +68,16 @@ a:hover { text-decoration: underline; }
   backdrop-filter: saturate(1.8) blur(10px);
   border-bottom: 1px solid var(--border);
 }
-.bar { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 16px; min-height: 56px; }
+.bar { max-width: 1360px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 14px; min-height: 52px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); flex: none; }
 .brand:hover { text-decoration: none; }
 .brand-mark { width: 14px; height: 14px; border-radius: 3px; background: linear-gradient(135deg, #f5c451, #b7791f); box-shadow: 0 0 0 1px rgba(245, 196, 81, 0.25); }
 .brand-text { display: grid; line-height: 1.15; }
 .brand-title { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
 .brand-tag { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
-/* The tab row: 21 sections never fit, so it scrolls sideways. app.js sets data-more="start end"
-   on the wrapper for the sides that have more tabs; each side then gets a fade and an arrow. */
-.tabs-wrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; margin-left: auto; }
+/* The tab row: one tab per group, so it fits a laptop; on a narrower window it scrolls sideways.
+   app.js sets data-more="start end" on the wrapper for the sides with more tabs (fade + arrow). */
+.tabs-wrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; margin-left: 8px; }
 .tabs {
   --fade-l: 0px; --fade-r: 0px;
   position: relative; flex: 1 1 auto; min-width: 0; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none;
@@ -82,10 +86,7 @@ a:hover { text-decoration: underline; }
 .tabs-wrap[data-more~="start"] .tabs { --fade-l: 36px; }
 .tabs-wrap[data-more~="end"] .tabs { --fade-r: 36px; }
 .tabs::-webkit-scrollbar { display: none; }
-.tabs a { position: relative; flex: none; padding: 17px 11px; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-2); border-bottom: 2px solid transparent; }
-/* A hairline before the first tab of each group (Who, Reserves, Updates), matching the menu's groups. */
-.tabs a.grp { margin-left: 9px; }
-.tabs a.grp::before { content: ""; position: absolute; left: -5px; top: 50%; translate: 0 -50%; width: 1px; height: 14px; background: var(--border-2); }
+.tabs a { position: relative; flex: none; padding: 15px 12px; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-2); border-bottom: 2px solid transparent; }
 .tabs a:hover { color: var(--ink); text-decoration: none; }
 .tabs a[aria-current="true"] { color: var(--ink); border-bottom-color: var(--ink); }
 .tabs-arrow {
@@ -100,7 +101,20 @@ a:hover { text-decoration: underline; }
   .tabs-wrap[data-more~="start"] > .prev, .tabs-wrap[data-more~="end"] > .next { display: grid; }
 }
 
-/* "Sections": every section in a grouped menu. On a phone the button also names the section in view. */
+/* The daily job's health: a dot and a few words. Red with a reason when a run failed or never
+   started, so the colour never stands alone. */
+.health {
+  flex: none; display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px;
+  border: 1px solid var(--border-2); border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap;
+}
+.health:hover { text-decoration: none; color: var(--ink); border-color: #3a3a3a; }
+.health[hidden] { display: none; }
+.health i { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 3px var(--up-bg); }
+.health.bad { color: var(--down); border-color: var(--down-line); background: var(--down-bg); }
+.health.bad i { background: var(--down); box-shadow: 0 0 0 3px var(--down-bg); }
+.health-short { display: none; }
+
+/* "Sections": every card in a grouped menu. On a phone the button also names the card in view. */
 .menu-btn {
   flex: none; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px 0 12px;
   border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface); color: var(--ink);
@@ -112,68 +126,96 @@ a:hover { text-decoration: underline; }
 .menu-btn .menu-chev { flex: none; color: var(--ink-2); transition: rotate 0.15s; }
 .menu-btn[aria-expanded="true"] .menu-chev { color: #000; rotate: 180deg; }
 .menu {
-  inset: auto; margin: 0; padding: 8px; width: min(640px, 100vw - 24px); max-height: calc(100dvh - 80px); overflow: auto;
-  display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 14px;
+  inset: auto; margin: 0; padding: 8px; width: min(760px, 100vw - 24px); max-height: calc(100dvh - 76px); overflow: auto;
+  display: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 12px;
   background: var(--surface); color: var(--ink); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: var(--shadow);
 }
 .menu:popover-open { display: grid; }
 .menu::backdrop { background: rgba(0, 0, 0, 0.45); }
 .menu-group h3 { margin: 8px 10px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
-.menu-group + .menu-group h3 { margin-top: 8px; }
-.menu a { display: block; padding: 6px 10px; border-radius: 6px; color: var(--ink); font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+.menu a { display: block; padding: 5px 10px; border-radius: 6px; color: var(--ink); font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
 .menu a small { display: block; margin-top: 1px; font-size: 11.5px; font-weight: 400; color: var(--ink-2); letter-spacing: 0; }
 .menu a:hover { background: var(--surface-2); text-decoration: none; }
 .menu a[aria-current="true"] { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--ink); }
 
-.wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px 56px; }
+.wrap { max-width: 1360px; margin: 0 auto; padding: 0 24px 32px; }
 
-/* ---- Status, latest update, freshness ---- */
+/* ---- Status ---- */
 /* The status line shows "Loading…" or a load error, and hides once the data is in. */
-.status { margin: 16px 0 12px; font-size: 14px; color: var(--ink-2); }
-.latest { margin: 12px 2px 0; font-size: 13px; color: var(--ink-2); max-width: 110ch; font-variant-numeric: tabular-nums; }
-.latest strong { color: var(--ink); font-weight: 600; }
-.freshness { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
-.freshness.error, .status.error { color: var(--down); }
-main { padding-top: 4px; }
+.status { margin: 14px 0 0; font-size: 14px; color: var(--ink-2); }
+.status.error { color: var(--down); }
+
+/* ---- The grid: a stack of groups, each a 12-column grid of cards ---- */
+main { display: grid; gap: var(--gap); padding-top: var(--gap); }
+.group { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); }
+.group > .card { grid-column: 1 / -1; min-width: 0; }
+@media (min-width: 720px) and (max-width: 1099.98px) {
+  .group > .m6 { grid-column: span 6; }
+}
+@media (min-width: 1100px) {
+  .group > .c4 { grid-column: span 4; }
+  .group > .c5 { grid-column: span 5; }
+  .group > .c6 { grid-column: span 6; }
+  .group > .c7 { grid-column: span 7; }
+  .group > .c8 { grid-column: span 8; }
+}
+/* Context and Data: closed tiles side by side; an open tile takes the whole row, and the closed
+   ones close ranks above it (dense), so the row of headings stays one row. */
+.group.folds { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); grid-auto-flow: dense; }
+.group.folds > .card { grid-column: auto; }
+.group.folds > .card:has(> details[open]) { grid-column: 1 / -1; }
 
 /* ---- Panels ---- */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 18px 20px 20px;
-  margin: 14px 0;
+  padding: 15px 18px 16px;
 }
-.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
-h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 6px; }
+h2 { margin: 0 0 2px; font-size: 15.5px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }
 .panel-head h2 { margin: 0; }
-.sub { margin: 0 0 14px; color: var(--ink-2); font-size: 12.5px; max-width: 78ch; }
-.sub.small { font-size: 12px; margin-bottom: 8px; }
+.sub { margin: 0 0 10px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.sub.small { font-size: 12px; margin-bottom: 6px; }
 .h3, .chart-label {
-  margin: 18px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2);
+  margin: 14px 0 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2);
 }
-.split .h3:first-child, .split > div > .h3:first-child { margin-top: 10px; }
-.caveat { margin: 12px 2px 0; color: var(--ink-2); font-size: 12px; max-width: 110ch; }
-.chart-note { margin: 8px 0 0; font-size: 12px; color: var(--ink-2); }
+.h3.first { margin-top: 4px; }
+.chart-note { margin: 6px 0 0; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.chart-note.error { color: var(--down); }
 
-/* ---- Hero ---- */
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: center; padding: 22px 24px; }
-.hero-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
-.hero-value { margin: 6px 0 2px; font-size: 44px; font-weight: 600; letter-spacing: -0.04em; line-height: 1.05; }
-.hero-asof { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-variant-numeric: tabular-nums; }
-.hero-sub { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
-.hero-aside { display: grid; justify-items: end; gap: 10px; }
-.hero-aside .spark { width: 260px; max-width: 100%; height: auto; }
+/* ---- The gauge: the answer, the numbers that qualify it, and what's new ---- */
+.gauge { display: flex; flex-direction: column; }
+.hero-label { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); line-height: 1.4; }
+.hero-value { margin: 2px 0 6px; font-size: 54px; font-weight: 600; letter-spacing: -0.045em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.hero-word { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.hero-asof { margin: 8px 0 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); font-variant-numeric: tabular-nums; }
+/* Key numbers as a list: label and value on one line, the reason under them. */
+.kpis { margin: 12px 0 0; border-top: 1px solid var(--border); }
+.kpis .stat { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--border); }
+.kpis .stat:first-child { border-top: 0; }
+.kpis .stat-value { grid-column: 2; grid-row: 1; margin: 0; font-size: 17px; text-align: right; }
+.kpis .stat-sub { grid-column: 1 / -1; }
+.latest { margin: 4px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--ink-2); line-height: 1.45; font-variant-numeric: tabular-nums; }
+.latest strong { color: var(--ink); font-weight: 600; }
+.caveat { margin: 8px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+/* A tablet gives the gauge the full width: the number on the left, its key numbers on the right. */
+@media (min-width: 720px) and (max-width: 1099.98px) {
+  .gauge { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 28px; }
+  .gauge > #hero { grid-area: 1 / 1; }
+  .gauge > .kpis { grid-area: 1 / 2 / 4 / 3; margin-top: 0; border-top: 0; }
+  .gauge > .latest { grid-area: 2 / 1; margin-top: 12px; }
+  .gauge > .caveat { grid-area: 3 / 1; }
+}
 
 /* ---- Pills and tags ---- */
 .pill {
   display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap;
-  padding: 6px 13px; border-radius: 999px; font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink);
 }
 .pill.up { color: var(--up); background: var(--up-bg); border-color: var(--up-line); }
 .pill.down { color: var(--down); background: var(--down-bg); border-color: var(--down-line); }
-.pill .vs { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
 .tag {
   display: inline-block; padding: 1px 6px; border: 1px solid var(--border-2); border-radius: 4px; vertical-align: 1px;
   font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap;
@@ -182,32 +224,41 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .pos { color: var(--up); }
 .neg { color: var(--down); }
 
-/* ---- Stat groups ---- */
-.stat-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; margin: 14px 0 0; }
-.stat-group { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0 18px 6px; min-width: 0; }
-.stat-group-title { margin: 0; padding: 14px 0 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
-.stat { padding: 11px 0; border-top: 1px solid var(--border); }
-.stat:first-of-type { border-top: 0; }
+/* ---- Stats ---- */
 .stat-label { margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
 .stat-value { margin: 2px 0 1px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.stat-sub { margin: 0; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.stat-sub { margin: 0; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; line-height: 1.4; }
 .stat-sub + .stat-sub { margin-top: 1px; }
-.meter { margin-top: 8px; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.meter { margin-top: 6px; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
 .meter > span { display: block; height: 100%; border-radius: 3px; background: var(--line); }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; margin: 4px 0 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.stats > div { padding: 8px 12px; min-width: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: 0 -1px -1px 0; }
+.stats dt { color: var(--ink-2); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.stats dd { margin: 2px 0 0; font-weight: 600; font-size: 16px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.stats dd small { display: block; font-weight: 400; color: var(--ink-2); font-size: 11px; letter-spacing: 0; line-height: 1.35; }
 
 /* ---- Segmented control ---- */
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .seg button {
-  font: 600 12.5px/1 var(--font); letter-spacing: 0.02em; color: var(--ink-2); background: transparent;
-  border: 0; padding: 8px 13px; cursor: pointer;
+  font: 600 12px/1 var(--font); letter-spacing: 0.02em; color: var(--ink-2); background: transparent;
+  border: 0; padding: 7px 11px; cursor: pointer;
 }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button:hover { color: var(--ink); }
 .seg button[aria-pressed="true"] { background: var(--ink); color: #000; }
 .seg button:focus-visible { outline-offset: -2px; }
 
+/* ---- Controls ---- */
+.controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+select {
+  font: 500 13px var(--font); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border-2); border-radius: 6px; padding: 6px 28px 6px 10px; max-width: 100%;
+}
+.panel-head select { min-width: 0; max-width: 100%; }
+
 /* ---- Charts ---- */
-.chart { position: relative; min-height: 120px; }
+.chart { position: relative; min-height: 80px; }
 .chart svg { display: block; width: 100%; overflow: visible; touch-action: pan-y; }
 .chart svg:focus { outline: none; }
 .chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
@@ -247,7 +298,7 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .spark.down .spark-line { stroke: var(--sell); }
 .spark.down .spark-dot { fill: var(--down); }
 
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 8px; font-size: 12px; color: var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; font-size: 12px; color: var(--ink-2); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; background: var(--line); }
 .legend i.s2 { background: var(--s2); }
@@ -255,10 +306,11 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .legend i.buy { background: var(--buy); }
 .legend i.sell { background: var(--sell); }
 
-.marks-key { margin: 10px 0 0; padding-left: 0; list-style: none; display: grid; gap: 3px; font-size: 12px; color: var(--ink-2); }
-.marks-key li { display: flex; gap: 8px; align-items: baseline; }
-.marks-key .n { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--ink-2); font-size: 10px; font-weight: 700; color: var(--ink); }
-.marks-key .n.key-rule { border: 0; border-radius: 0; height: 0; width: 18px; border-top: 1px dashed var(--ink-2); align-self: center; }
+/* The trend's numbered markers: one wrapped line under the chart, not a list. */
+.marks-key { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 3px 16px; font-size: 11.5px; color: var(--ink-2); line-height: 1.4; }
+.marks-key li { display: flex; gap: 6px; align-items: baseline; }
+.marks-key .n { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--ink-2); font-size: 9.5px; font-weight: 700; color: var(--ink); }
+.marks-key .n.key-rule { border: 0; border-radius: 0; height: 0; width: 16px; border-top: 1px dashed var(--ink-2); align-self: center; }
 
 /* Reference line (the owner's trigger) and journal flags on the trend chart */
 .rule { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 4; shape-rendering: crispEdges; }
@@ -266,12 +318,11 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .flag { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
 
 /* Journal entries */
-.journal { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.journal li { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; background: var(--page); }
-.journal-when { margin: 0 0 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.journal { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.journal li { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--page); }
+.journal-when { margin: 0 0 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
 .journal-when .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
-.journal li p:last-child { margin: 0; font-size: 13.5px; }
-.h3.first { margin-top: 10px; }
+.journal li p:last-child { margin: 0; font-size: 13px; }
 
 .tt {
   position: absolute; z-index: 5; pointer-events: none; min-width: 160px; max-width: 280px;
@@ -293,14 +344,14 @@ h2 { margin: 0 0 4px; font-size: 16.5px; font-weight: 700; letter-spacing: -0.02
 .tt-note .tt-label { white-space: normal; overflow: visible; }
 
 /* ---- Tables ---- */
-.table-wrap { overflow: auto; max-inline-size: 100%; margin-top: 8px; }
-.table-wrap.scroll { max-block-size: min(440px, 70vh); }
+.table-wrap { overflow: auto; max-inline-size: 100%; margin-top: 6px; }
+.table-wrap.scroll { max-block-size: min(420px, 70vh); }
 table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
-caption { text-align: left; color: var(--ink-2); font-size: 11.5px; padding: 0 0 8px; }
-th, td { padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+caption { text-align: left; color: var(--ink-2); font-size: 11.5px; padding: 0 0 6px; }
+th, td { padding: 6px 9px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
 thead th {
   position: sticky; top: 0; z-index: 2; background: var(--surface); color: var(--ink-2);
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.3; vertical-align: bottom;
 }
 tbody th { position: sticky; left: 0; z-index: 1; background: var(--surface); font-weight: 600; }
 thead th:first-child { left: 0; z-index: 3; }
@@ -308,82 +359,87 @@ tbody tr:hover th, tbody tr:hover td { background: var(--surface-2); }
 th.l, td.l { text-align: left; }
 td.muted, span.muted { color: var(--ink-2); }
 td.flag { color: var(--ink); }
+td .spark { display: block; margin-left: auto; }
 .holder-btn { font: inherit; font-weight: 600; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
 .holder-btn:hover { color: var(--accent); }
+tr.on th, tr.on td { background: var(--surface-2); }
+tr.on .holder-btn { color: var(--accent); }
 .rank { color: var(--muted); font-weight: 500; }
 
-details.data-table { margin-top: 12px; }
-details.data-table summary { cursor: pointer; color: var(--ink-2); font-size: 12px; font-weight: 600; width: fit-content; }
-details.data-table summary:hover { color: var(--ink); }
+/* "Show as a table": one small line until opened. */
+details.data-table { margin-top: 8px; }
+details.data-table summary { cursor: pointer; color: var(--muted); font-size: 11.5px; font-weight: 600; width: fit-content; }
+details.data-table summary:hover, details.data-table[open] summary { color: var(--ink); }
 .csv-btn {
-  margin-top: 10px; font: 600 12px/1 var(--font); color: var(--ink-2); background: transparent; cursor: pointer;
-  border: 1px solid var(--border-2); border-radius: 6px; padding: 7px 11px;
+  margin-top: 8px; font: 600 12px/1 var(--font); color: var(--ink-2); background: transparent; cursor: pointer;
+  border: 1px solid var(--border-2); border-radius: 6px; padding: 6px 10px;
 }
 .csv-btn:hover { color: var(--ink); border-color: var(--ink-2); }
-.chart-note.error { color: var(--down); }
+
+/* ---- Lists ---- */
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 14px; }
+.split > * { min-width: 0; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 18px; }
+.pair.wide { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 0 24px; }
+.pair > * { min-width: 0; }
+.list-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--page); }
+.list-card h3 { margin: 0 0 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.list-card p { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.list-card ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.list-card li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; border-top: 1px solid var(--border); }
+.list-card li:first-child { border-top: 0; }
+.list-card li .v { font-variant-numeric: tabular-nums; color: var(--ink-2); }
 
 /* ---- Updates feed ---- */
-.split.updates { margin-top: 4px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.split.updates { margin-top: 4px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
 .update h3 { font-size: 11px; }
 .update-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 6px; }
 .list-card .update-gauge, .list-card .update-more { margin: 0 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .list-card .update-more { margin: 6px 0 0; }
 .update li > span:first-child { color: var(--ink); }
 
-/* ---- Controls ---- */
-.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 12px; }
-.controls label { color: var(--ink-2); font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
-select {
-  font: 500 13.5px var(--font); color: var(--ink); background: var(--surface);
-  border: 1px solid var(--border-2); border-radius: 6px; padding: 8px 30px 8px 12px; max-width: 100%;
-}
-
-/* ---- Lists, holder stats ---- */
-.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px 28px; }
-.split > * { min-width: 0; }
-.list-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--page); }
-.list-card h3 { margin: 0 0 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
-.list-card p { margin: 0; font-size: 12.5px; color: var(--ink-2); }
-.list-card ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-.list-card li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-top: 1px solid var(--border); }
-.list-card li:first-child { border-top: 0; }
-.list-card li .v { font-variant-numeric: tabular-nums; color: var(--ink-2); }
-#momentum-table { margin-top: 14px; }
-
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0; margin: 6px 0 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.stats > div { padding: 10px 14px; min-width: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: 0 -1px -1px 0; }
-.stats dt { color: var(--ink-2); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
-.stats dd { margin: 3px 0 0; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.stats dd small { display: block; font-weight: 400; color: var(--ink-2); font-size: 11.5px; letter-spacing: 0; }
-
-/* ---- Folded sections (Reserves, Dollar, Supply, Funds) ---- */
-/* The summary is the section's heading plus one line; the chevron turns when it opens. */
+/* ---- Folded tiles (Context, Data) ---- */
+/* Closed: the heading, one line of what it says, a chevron. Open: the full card across the row. */
+.group.folds > .card { padding: 13px 16px; }
 details.fold > summary {
-  list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; align-items: center;
+  list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start;
 }
 details.fold > summary::-webkit-details-marker { display: none; }
-details.fold > summary h2 { grid-column: 1; margin: 0; }
-.fold-sum { grid-column: 1; margin-top: 3px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+details.fold > summary h2 { grid-column: 1; margin: 0; font-size: 14px; }
+.fold-sum { grid-column: 1; margin-top: 3px; font-size: 12px; color: var(--ink-2); line-height: 1.45; font-variant-numeric: tabular-nums; }
 .fold-sum .pos, .fold-sum .neg { white-space: nowrap; } /* keep an arrow with its number */
 .fold-chev {
   grid-column: 2; grid-row: 1 / span 2; display: grid; place-items: center;
-  width: 30px; height: 30px; border: 1px solid var(--border-2); border-radius: 50%;
+  width: 26px; height: 26px; border: 1px solid var(--border-2); border-radius: 50%;
 }
 .fold-chev::before {
-  content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--ink-2); border-bottom: 1.6px solid var(--ink-2);
+  content: ""; width: 6px; height: 6px; border-right: 1.6px solid var(--ink-2); border-bottom: 1.6px solid var(--ink-2);
   transform: translateY(-2px) rotate(45deg); transition: transform 0.15s ease;
 }
 details.fold[open] .fold-chev::before { transform: translateY(2px) rotate(-135deg); }
 details.fold > summary:hover .fold-chev { border-color: var(--ink-2); }
-details.fold[open] > summary { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.fold-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+details.fold > summary:hover h2 { color: #fff; }
+details.fold[open] > summary { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+details.fold[open] > summary h2 { font-size: 15.5px; }
+.fold-tools { display: flex; justify-content: flex-end; margin: 0 0 6px; }
+/* Cards that close only on a phone (data-open-wide): open, they read like any other card, with the
+   chevron as the one sign that they fold. */
+details.fold[data-open-wide][open] > summary { margin-bottom: 6px; padding-bottom: 0; border-bottom: 0; }
+details.fold[data-open-wide][open] > summary .fold-sum { display: none; }
+details.fold[data-open-wide] > summary h2 { font-size: 15.5px; }
+details.fold[data-open-wide] .fold-body > .controls { margin: 4px 0 8px; }
+/* Secondary charts inside a card: one small line on a phone until opened. */
+details.more { margin-top: 4px; }
+details.more > summary { cursor: pointer; margin-top: 8px; color: var(--muted); font-size: 11.5px; font-weight: 600; width: fit-content; }
+details.more > summary:hover { color: var(--ink); }
+@media (min-width: 721px) { details.more[open] > summary { display: none; } }
 @media (prefers-reduced-motion: reduce) { .fold-chev::before { transition: none; } }
 
-/* ---- Notes (Method: one closed entry per topic), footer ---- */
+/* ---- Notes (Method: one closed entry per topic), sources, footer ---- */
 .notes details.note { border-top: 1px solid var(--border); }
 .notes details.note:last-child { border-bottom: 1px solid var(--border); }
 .notes details.note > summary {
-  list-style: none; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; padding: 10px 2px;
+  list-style: none; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; padding: 9px 2px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2);
 }
 .notes details.note > summary::-webkit-details-marker { display: none; }
@@ -392,27 +448,35 @@ details.fold[open] > summary { margin-bottom: 14px; padding-bottom: 12px; border
 .notes details.note[open] > summary::after { content: "\2212"; }
 .notes details.note > summary:hover { color: var(--ink); }
 .notes details.note > :last-child { margin-bottom: 12px; }
-.notes p, .notes li { color: var(--ink-2); font-size: 13px; max-width: 90ch; }
-.notes p { margin: 0 0 8px; }
-.notes ul { margin: 0 0 8px; padding-left: 18px; }
-.page-foot { color: var(--muted); font-size: 12px; padding: 10px 2px 0; max-width: 110ch; }
+.notes .fold-body p, .notes .fold-body li { color: var(--ink-2); font-size: 13px; max-width: 100ch; }
+.notes .fold-body p { margin: 0 0 8px; }
+.notes .fold-body ul { margin: 0 0 8px; padding-left: 18px; }
+.notes .sources { margin-top: 14px; font-size: 12px; }
+.notes .sources strong { color: var(--ink); }
+.page-foot { color: var(--muted); font-size: 11.5px; padding: 12px 2px 0; }
+.page-foot p { margin: 0; }
 
 @media (max-width: 720px) {
-  .bar { padding: 0 12px; gap: 12px; }
+  :root { --gap: 10px; }
+  .bar { padding: 0 12px; gap: 10px; }
   .brand-tag { display: none; }
-  /* Two and a half tabs out of 19 is no use on a phone: the row goes, and the Sections button
-     becomes a "current section" dropdown, like a select. */
+  /* A phone shows the card in view in the Sections button instead of a tab row. */
   .tabs-wrap { display: none; }
+  .health { padding: 0 9px; }
+  .health-long { display: none; }
+  .health-short { display: inline; }
   .menu-btn { flex: 1 1 auto; min-width: 0; justify-content: space-between; }
   .menu-btn .menu-current { display: block; }
   .menu-btn .menu-word { display: none; }
   .menu { grid-template-columns: 1fr; }
-  .wrap { padding: 0 12px 40px; }
-  .card { padding: 16px; }
-  .hero { grid-template-columns: 1fr; padding: 18px; }
-  .hero-aside { justify-items: start; }
-  .hero-value { font-size: 40px; }
-  th, td { padding: 7px 8px; }
+  .wrap { padding: 0 10px 28px; }
+  .card { padding: 13px 14px 14px; }
+  .hero-value { font-size: 46px; }
+  th, td { padding: 6px 7px; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stats dd { font-size: 15.5px; }
+  .stats dd { font-size: 15px; }
+  .pair.wide { grid-template-columns: 1fr; }
+}
+@media (min-width: 721px) and (max-width: 1000px) {
+  .menu { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

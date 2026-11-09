@@ -67,8 +67,8 @@ const groupOf = (code) => (ADVANCED.has(code) ? "adv" : "emd");
 
 // Fixed context markers for the trend chart. Two more are found in the data (see buildModel).
 const EVENTS = [
-  { k: "2019-09", text: "the Central Bank Gold Agreements expire. Since 1999 they had capped European central banks' gold sales." },
-  { k: "2022-02", text: "sanctions freeze the Bank of Russia's foreign reserves." },
+  { k: "2019-09", text: "the cap on European central banks' gold sales (since 1999) expires." },
+  { k: "2022-02", text: "sanctions freeze the Bank of Russia's reserves." },
 ];
 
 /* ---------- Months and numbers ---------- */
@@ -296,7 +296,7 @@ function buildModel(raw) {
   const marks = EVENTS.map((e) => ({ i: idx(e.k), text: `${mLabel(idx(e.k))}: ${e.text}` }));
   if (turnIdx >= 0) {
     const t = rolling12[turnIdx].i;
-    marks.push({ i: t, text: `${mLabel(t)}: the 12-month total turns positive, and has stayed positive since.`, turn: true });
+    marks.push({ i: t, text: `${mLabel(t)}: the 12-month total turns positive for good.`, turn: true });
   }
   const chn = holders.find((d) => d.code === "CHN");
   if (chn) {
@@ -539,24 +539,29 @@ function hbarPath(x0, x1, y, ht, r = 4) {
 
 /* ---------- Chart types ---------- */
 
+// height: a number, or a function of the chart's width (tall on a desktop, shorter on a phone).
+const chartH = (height, W) => (typeof height === "function" ? height(W) : height);
+
 function lineChart(container, opts) {
   const { points, label, height = 280, endLabel, tipRows, tipTitle = (p) => mLabel(p.i), fmtTick = tickText,
     cls = "", bands = [], marks = [], rules = [], flags = [], yMax, domain, zero = true } = opts;
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
+    const H = chartH(height, W);
     const M = { t: marks.length ? 30 : 14, r: endLabel ? (narrow ? 60 : 72) : 16, b: 30, l: 52 };
-    const pw = W - M.l - M.r, ph = height - M.t - M.b;
+    const pw = W - M.l - M.r, ph = H - M.t - M.b;
     // domain: a fixed x range, so charts stacked under each other line up month for month.
     const [x0, x1] = domain || [points[0].i, points.at(-1).i];
     const X = (i) => M.l + (x1 === x0 ? pw / 2 : ((i - x0) / (x1 - x0)) * pw);
     // zero: false lets a level series (a fund's tonnes) fill the height. Fine for a line, which is
     // read by its shape; bars always start at zero.
     const vs = [...points.map((p) => p.v), ...rules.map((r) => r.v)]; // a reference line must stay in view
-    const yt = zero ? niceTicks(Math.min(0, ...vs), Math.max(0, ...vs, yMax ?? -Infinity), narrow ? 4 : 5)
-      : niceTicks(Math.min(...vs), Math.max(...vs), narrow ? 4 : 5);
+    const nt = ph < 100 ? 2 : narrow ? 4 : 5;
+    const yt = zero ? niceTicks(Math.min(0, ...vs), Math.max(0, ...vs, yMax ?? -Infinity), nt)
+      : niceTicks(Math.min(...vs), Math.max(...vs), nt);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
     const floor = Math.min(Math.max(0, yt.lo), yt.hi); // where the area under the line closes
-    const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
+    const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": label });
     for (const b of bands) {
       const bx0 = X(Math.max(b.from, x0)), bx1 = X(Math.min(b.to, x1));
       svg.append(s("rect", { x: bx0, y: M.t, width: Math.max(0, bx1 - bx0), height: ph, class: "band" }));
@@ -568,7 +573,16 @@ function lineChart(container, opts) {
     for (const r of rules) {
       if (r.v < yt.lo || r.v > yt.hi) continue;
       svg.append(s("line", { x1: M.l, x2: M.l + pw, y1: Y(r.v), y2: Y(r.v), class: "rule" }));
-      if (r.label) svg.append(s("text", { x: M.l + pw - 4, y: Y(r.v) - 5, class: "rule-label", "text-anchor": "end" }, r.label));
+      if (!r.label) continue;
+      // The label sits at whichever end of the line the data stays clear of over the label's width,
+      // so it never lands on the series; with no clear end (a narrow chart) it is left out, and the
+      // key under the chart names the line instead.
+      const span = Math.min(pw, r.label.length * 6.4 + 10);
+      const gap = (a, b) => Math.min(Infinity, ...points.filter((q) => X(q.i) >= a && X(q.i) <= b).map((q) => Math.abs(Y(q.v) - Y(r.v))));
+      const gl = gap(M.l, M.l + span), gr = gap(M.l + pw - span, M.l + pw);
+      if (Math.max(gl, gr) < 14) continue;
+      const left = gl > gr;
+      svg.append(s("text", { x: left ? M.l + 4 : M.l + pw - 4, y: Y(r.v) - 5, class: "rule-label", "text-anchor": left ? "start" : "end" }, r.label));
     }
     // Numbered markers: a hairline at the month, a numbered circle above the plot. Circles that
     // would overlap slide right and keep a short leader back to their month.
@@ -632,15 +646,16 @@ function multiLineChart(container, { series, label, height = 280, fmt = signed, 
   tipTitle = (p) => mLabel(p.i) }) {
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
+    const H = chartH(height, W);
     const M = { t: 14, r: narrow ? 60 : 72, b: 30, l: 52 };
-    const pw = W - M.l - M.r, ph = height - M.t - M.b;
+    const pw = W - M.l - M.r, ph = H - M.t - M.b;
     const base = series[0].points;
     const x0 = base[0].i, x1 = base.at(-1).i;
     const X = (i) => M.l + ((i - x0) / ((x1 - x0) || 1)) * pw;
     const vs = series.flatMap((sr) => sr.points.map((p) => p.v)).filter(has);
     const yt = niceTicks(Math.min(0, ...vs), Math.max(0, ...vs), narrow ? 4 : 5);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
-    const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
+    const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": label });
     yGrid(svg, yt, Y, M.l, M.l + pw, fmtTick);
     yearAxis(svg, x0, x1, (i) => X(i), M.t + ph);
     const ends = [];
@@ -692,14 +707,15 @@ function multiLineChart(container, { series, label, height = 280, fmt = signed, 
 
 function columnChart(container, { bars, label, height = 240, tipRows, tipTitle = (b) => mLabel(b.i), axis = "months", fmtTick = tickText }) {
   mountChart(container, (W, tip) => {
+    const H = chartH(height, W);
     const M = { t: 14, r: 8, b: 30, l: 52 };
-    const pw = W - M.l - M.r, ph = height - M.t - M.b;
+    const pw = W - M.l - M.r, ph = H - M.t - M.b;
     const band = pw / bars.length;
     const bw = Math.max(2, Math.min(24, band - 2)); // at least a 2px surface gap between bars
     const vs = bars.map((b) => b.v);
     const yt = niceTicks(Math.min(0, ...vs), Math.max(0, ...vs), 4);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
-    const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
+    const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": label });
     yGrid(svg, yt, Y, M.l, M.l + pw, fmtTick);
     const bx = (k) => M.l + band * k;
     if (axis === "years") {
@@ -743,10 +759,10 @@ function columnChart(container, { bars, label, height = 240, tipRows, tipTitle =
   });
 }
 
-function hbarChart(container, { rows, label, tipRows, splitAt, fmt = signed, neutral = false }) {
+function hbarChart(container, { rows, label, tipRows, splitAt, fmt = signed, neutral = false, rowH = 30 }) {
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
-    const rowH = 30, bh = 16, gap = splitAt ? 14 : 0;
+    const bh = rowH >= 30 ? 16 : 14, gap = splitAt ? 12 : 0;
     const longest = Math.max(...rows.map((r) => r.name.length));
     const labelW = Math.min(narrow ? Math.max(120, W * 0.4) : 240, Math.max(narrow ? 90 : 120, longest * 6.8 + 16)), valW = 62;
     const vs = rows.map((r) => r.v);
@@ -861,14 +877,6 @@ function csvButton(wrap) {
 
 /* ---------- Sections ---------- */
 
-function renderFreshness(m) {
-  const reportersNewest = m.holders.filter((d) => d.last === m.newest).length;
-  // The Data tile above carries the pending months and how far each is reported; this line adds
-  // what it doesn't: how many holders have filed the newest month, and the rule a month must pass.
-  $("freshness").textContent = `Newest IMF month ${mLabel(m.newest)}, filed by ${reportersNewest} of ${m.holders.length} holders so far. `
-    + (m.complete < m.newest ? `A month enters the totals once the holders with ${pct(COVERAGE_MIN)} of the past year's buying and selling have filed it.` : "Every month is complete.");
-}
-
 // The next month to enter the totals and the fewest holders whose filings would get it there, in
 // order of activity weight. The Overview's latest-update line and the Quality section share it.
 function nextToComplete(m) {
@@ -944,18 +952,19 @@ function headline(m) {
     share: gross ? top2.reduce((a, x) => a + x.v, 0) / gross : 0 };
 }
 
+// The answer, first: 12-month net reported buying, the gauge's word, and the year before. The trend
+// chart beside it replaces the old sparkline.
 function renderHero(m) {
   const k = headline(m);
   const d = k.r12 - k.prev12;
+  const word = trendWord(k.r12, k.pace);
   put("hero",
-    h("div", {},
-      h("p", { class: "hero-label" }, "Net reported buying · last 12 months"),
-      h("p", { class: "hero-value" }, signed(k.r12)),
-      h("p", { class: "hero-asof" }, `As of ${mLabel(k.c)} · ${m.holders.length} holders · IMF IRFCL`),
-      h("p", { class: "hero-sub" }, `${mRange(k.c - 11, k.c)} · prior 12 months ${signed(k.prev12)}`)),
-    h("div", { class: "hero-aside" },
-      h("span", { class: `pill ${d >= 0 ? "up" : "down"}` }, `${d >= 0 ? "▲" : "▼"} ${signed(d)}`, h("span", { class: "vs" }, "vs prior 12 months")),
-      sparkline(m.rolling12.slice(-60).map((p) => p.v), 260, 64, k.r12 >= 0 ? "up" : "down")));
+    h("h2", { class: "hero-label", id: "gauge-h" }, `Net reported buying · 12 months to ${mLabel(k.c)}`),
+    h("p", { class: "hero-value" }, signed(k.r12)),
+    h("p", { class: "hero-word" },
+      h("span", { class: `pill ${word.icon === "▲" ? "up" : word.icon === "▼" ? "down" : ""}` }, `${word.icon} ${word.text}`),
+      h("span", {}, delta(d, signed(d)), ` vs the 12 months before (${signed(k.prev12)})`)),
+    h("p", { class: "hero-asof" }, `${mRange(k.c - 11, k.c)} · ${m.holders.length} holders · IMF IRFCL`));
 }
 
 function stat(label, value, subs = [], cls = null) {
@@ -964,7 +973,6 @@ function stat(label, value, subs = [], cls = null) {
     h("p", { class: `stat-value${cls ? ` ${cls}` : ""}` }, value),
     ...subs.filter(Boolean).map((x) => h("p", { class: "stat-sub" }, x)));
 }
-const group = (title, ...stats) => h("div", { class: "stat-group", "data-group": title }, h("h3", { class: "stat-group-title" }, title), ...stats.filter(Boolean));
 
 function breadthStat(m) {
   const now = m.breadth.at(-1), then = m.breadth.find((p) => p.i === now.i - 12);
@@ -979,10 +987,10 @@ const RUN_GRACE_H = 3;
 const STALE_CHECK_H = 30; // no check for this long: the tile turns red
 const REVISIONS_MIN = 50; // figures tracked before the revisions tiles and chart are worth showing
 
-// A failed run emails the owner; a run that never starts sends nothing, so this tile is the only
-// place a missed day shows. It counts both, and says how long ago the last check was.
-function checksStat(runs, now = Date.now()) {
-  if (!runs.length) return null;
+// A failed run emails the owner; a run that never starts sends nothing, so the header chip is the
+// one place a missed day shows. It counts both, and says how long ago the last check was.
+function checksInfo(runs, now = Date.now()) {
+  if (!runs?.length) return null;
   const passed = runs.filter((x) => x.result === "pass").length;
   const lastRun = runs.at(-1), lastT = Date.parse(lastRun.run_at_utc);
   const ran = new Set(runs.map((x) => x.run_at_utc.slice(0, 10)));
@@ -992,44 +1000,40 @@ function checksStat(runs, now = Date.now()) {
     if (!ran.has(day) && t + (RUN_UTC_MIN + RUN_GRACE_H * 60) * 60000 <= now) missed.push(t);
   }
   const ageH = (now - lastT) / 3600000;
-  const ago = ageH < 1 ? "under an hour ago" : ageH < 48 ? `${plural(Math.floor(ageH), "hour")} ago` : `${plural(Math.floor(ageH / 24), "day")} ago`;
-  const hhmm = lastRun.run_at_utc.slice(11, 16);
+  const age = ageH < 1 ? "under an hour" : ageH < 48 ? `${Math.floor(ageH)} h` : `${Math.floor(ageH / 24)} days`;
   const ok = passed === runs.length && !missed.length && ageH <= STALE_CHECK_H;
-  return stat("Daily checks", `${passed} of ${runs.length} passed`, [
-    `Last run ${ago} (${DAY.format(lastT)}, ${hhmm} UTC), ${lastRun.result}`,
-    missed.length ? h("span", { class: "neg" }, `▼ ${plural(missed.length, "day")} with no run: ${missed.slice(-3).map((t) => DAY.format(t)).join(", ")}`) : "no day missed",
-  ], ok ? "pos" : "neg");
+  // The reason the chip is red, most urgent first, long and short: the colour never stands alone.
+  const why = ok ? null : lastRun.result !== "pass" ? ["Last check failed", "Failed"]
+    : missed.length ? [`${plural(missed.length, "day")} with no check`, `${missed.length} d missed`]
+    : ageH > STALE_CHECK_H ? [`No check for ${age}`, age] : [`${runs.length - passed} of ${runs.length} checks failed`, "Failed"];
+  return { runs: runs.length, passed, lastT, result: lastRun.result, hhmm: lastRun.run_at_utc.slice(11, 16), missed, ageH, age, ok, why };
 }
 
-function renderStatGroups(m, r, log) {
+function renderHealth(c) {
+  const el = $("health");
+  if (!c) return;
+  el.hidden = false;
+  el.classList.toggle("bad", !c.ok);
+  $("health-long").textContent = c.ok ? `Checked ${c.age} ago` : c.why[0];
+  $("health-short").textContent = c.ok ? c.age.replace("under an hour", "<1 h") : c.why[1];
+  const label = `Daily IMF check: ${c.passed} of ${c.runs} passed; last run ${DAY.format(c.lastT)}, ${c.hhmm} UTC, ${c.result}; `
+    + (c.missed.length ? `${plural(c.missed.length, "day")} with no run.` : "no day missed.");
+  el.title = label;
+  el.setAttribute("aria-label", label);
+}
+
+// The gauge's key numbers, in the order a decision reads them: pace, the latest month, the trigger,
+// then how much of the buying rests on two holders and how many are adding.
+function renderKpis(m) {
   const k = headline(m);
-  const word = trendWord(k.r12, k.pace);
   const last = m.months.get(k.c);
-  const groups = [
-    group("Pace",
-      stat("Last 3 months", signed(k.r3), [mRange(k.c - 2, k.c), delta(k.pace - k.r12, `${word.text} · ${signed(k.pace)} a year`, Math.max(0.15 * Math.abs(k.r12), 20))], tone(k.r3)),
-      stat(`${mLabel(k.c)}`, signed(last.net), [`Biggest: ${last.contrib.slice(0, 2).map(({ d, c }) => `${d.name} ${signed(c)}`).join(", ")}`], tone(last.net)),
-      triggerStat(k)),
-    group("Who",
-      stat("Top two share", pct(k.share), [`of gross reported buying: ${k.top2.map((x) => x.d.name).join(" and ")}`,
-        h("div", { class: "meter", role: "img", "aria-label": `${pct(k.share)} share` }, h("span", { style: `width:${(k.share * 100).toFixed(1)}%` }))]),
-      k.buyers[0] ? stat("Top buyer", k.buyers[0].d.name, [h("span", {}, sv(k.buyers[0].v), ` over the 12 months to ${mLabel(k.c)}`)]) : null,
-      k.sellers[0] ? stat("Biggest seller", k.sellers[0].d.name, [h("span", {}, sv(k.sellers[0].v), ` over the 12 months to ${mLabel(k.c)}`)]) : null,
-      breadthStat(m)),
-  ];
-  if (r && r.worldSeries.length) {
-    const { now, then } = shareYearAgo(r);
-    groups.push(group("Reserves",
-      stat("Gold share of reserves", pct1(now.v), [mLabel(now.i), then ? delta(now.v - then.v, `${pts(now.v - then.v)} y/y`, 0.0005) : null]),
-      now.price ? stat("Implied gold price", `${usd(now.price)}/oz`, [`${mLabel(now.i)} · median across reporting holders`,
-        then?.price ? delta(now.price / then.price - 1, `${pct(Math.abs(now.price / then.price - 1))} y/y`, 0.005) : null]) : null));
-  }
-  const pending = [];
-  for (let i = m.complete + 1; i <= m.newest; i++) pending.push(`${MONTH_ONLY.format(asDate(i))} ${pct(m.months.get(i).coverage)}`);
-  groups.push(group("Data",
-    stat("Totals complete through", mLabel(m.complete), [pending.length ? `Still reporting: ${pending.join(", ")}` : "All months reported"]),
-    checksStat(log || [])));
-  put("stat-groups", groups);
+  put("kpis",
+    stat("Last 3 months", signed(k.r3), [`${mRange(k.c - 2, k.c)} · ${signed(k.pace)} a year at that pace`], tone(k.r3)),
+    stat("Latest complete month", signed(last.net), [`${mLabel(k.c)} · ${last.contrib.slice(0, 2).map(({ d, c }) => `${d.name} ${signed(c)}`).join(", ")}`], tone(last.net)),
+    triggerStat(k),
+    stat("Top two buyers' share", pct(k.share), [`of gross reported buying: ${k.top2.map((x) => x.d.name).join(" and ")}`,
+      h("div", { class: "meter", role: "img", "aria-label": `${pct(k.share)} share` }, h("span", { style: `width:${(k.share * 100).toFixed(1)}%` }))]),
+    breadthStat(m));
 }
 
 function renderRolling(m, r, years = 0) {
@@ -1038,6 +1042,7 @@ function renderRolling(m, r, years = 0) {
   renderTrendPrice(m, r, pts12[0].i, pts12.at(-1).i);
   lineChart($("chart-rolling"), {
     points: pts12,
+    height: (W) => (W >= 640 ? 330 : 230),
     label: `Line chart of 12-month net reported central bank gold buying, ${mLabel(pts12[0].i)} to ${mLabel(pts12.at(-1).i)}. Latest ${signed(pts12.at(-1).v)}.`,
     endLabel: (p) => signed(p.v),
     bands: m.turn ? [{ from: pts12[0].i, to: m.turn, label: "Net selling, led by European central banks" }] : [],
@@ -1072,7 +1077,7 @@ function renderTrendPrice(m, r, x0, x1) {
   lineChart($("chart-trend-price"), {
     points: pp,
     domain: [x0, x1],
-    height: 170,
+    height: (W) => (W >= 640 ? 110 : 90),
     cls: "s2",
     fmtTick: usdTick,
     endLabel: (p) => usd(p.v),
@@ -1088,17 +1093,16 @@ function wireTrendRange(m, r) {
   wireSeg("trend-range", years, (v) => { renderRolling(m, r, Number(v)); setParam("range", v); });
 }
 
-// The header: highlight the tab and menu entry of the section in view, keep that tab visible in the
-// scrolling row, show arrows and fades where the row has more tabs, let the mouse wheel scroll the
-// row, and place the Sections menu under its button.
+// The header: mark the group in view in the tab row and the card in view in the Sections menu (on a
+// phone the Sections button names it), keep that tab visible in the row, show arrows and fades where
+// the row has more tabs, let the mouse wheel scroll the row, and place the menu under its button.
 function scrollSpy() {
   const wrap = $("tabs-wrap");
   const nav = wrap.querySelector(".tabs");
   const menu = $("sections-menu");
   const btn = $("sections-btn");
   const tabs = [...nav.querySelectorAll("a")];
-  const ids = tabs.map((a) => a.getAttribute("href").slice(1));
-  const links = [...tabs, ...menu.querySelectorAll("a")];
+  const items = [...menu.querySelectorAll("a")];
   const instant = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // Which sides of the row still have tabs: data-more="start end" drives the fades and arrows.
@@ -1124,7 +1128,7 @@ function scrollSpy() {
   }
 
   // The menu is a native popover (top layer, Escape and outside clicks close it); it only needs
-  // placing under its button, and closing when a section is picked.
+  // placing under its button, and closing when a card is picked.
   menu.addEventListener("toggle", (ev) => {
     const open = ev.newState === "open";
     btn.setAttribute("aria-expanded", String(open));
@@ -1135,28 +1139,52 @@ function scrollSpy() {
   });
   menu.addEventListener("click", (ev) => { if (ev.target.closest("a")) menu.hidePopover(); });
 
-  // Of the sections inside the band near the top of the viewport, the first in page order is the
-  // one being read. A set, not the last entry: the observer only reports crossings, so a section
-  // that stays in the band must not be forgotten when a neighbour leaves it.
+  // Of the cards inside the band near the top of the viewport, the first in page order is the one
+  // being read, and its group is the tab. A set, not the last entry: the observer only reports
+  // crossings, so a card that stays in the band must not be forgotten when a neighbour leaves it.
+  const cards = [...document.querySelectorAll("main .group > section[id]")];
+  const mark = (a, on) => (on ? a.setAttribute("aria-current", "true") : a.removeAttribute("aria-current"));
   let current = null;
   const inBand = new Set();
-  const activate = (id) => {
-    if (id === current) return;
-    current = id;
-    for (const a of links) {
-      if (a.getAttribute("href") === `#${id}`) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
-    }
-    const tab = tabs[ids.indexOf(id)];
-    $("menu-current").textContent = tab.textContent;
+  const activate = (card) => {
+    if (card === current) return;
+    current = card;
+    const group = `#${card.closest(".group").id}`, href = `#${card.id}`;
+    for (const a of tabs) mark(a, a.getAttribute("href") === group);
+    for (const a of items) mark(a, a.getAttribute("href") === href);
+    const tab = tabs.find((a) => a.getAttribute("href") === group);
+    const item = items.find((a) => a.getAttribute("href") === href);
+    $("menu-current").textContent = item?.firstChild?.textContent.trim() || tab?.textContent || "";
     // Centre the tab in the row, unless the pointer is on the row: then the reader is browsing it.
-    if (!nav.matches(":hover")) nav.scrollTo({ left: tab.offsetLeft - (nav.clientWidth - tab.offsetWidth) / 2, behavior: "auto" });
+    if (tab && !nav.matches(":hover")) nav.scrollTo({ left: tab.offsetLeft - (nav.clientWidth - tab.offsetWidth) / 2, behavior: "auto" });
+  };
+  // At the bottom of the page the last groups can never reach the band, so there the last card on
+  // screen is the one being read. A click on a tab or a menu entry marks its target at once, and the
+  // observer waits until the reader scrolls by hand again (the jump itself fires observer updates).
+  let pinned = false;
+  const atBottom = () => scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
+  const update = () => {
+    if (pinned) return;
+    const seen = atBottom() ? cards.filter((c) => !c.hidden && c.getBoundingClientRect().top < innerHeight - 40).at(-1) : null;
+    const first = seen || cards.find((c) => inBand.has(c));
+    if (first) activate(first);
   };
   const io = new IntersectionObserver((entries) => {
-    for (const e of entries) { if (e.isIntersecting) inBand.add(e.target.id); else inBand.delete(e.target.id); }
-    const first = ids.find((id) => inBand.has(id));
-    if (first) activate(first);
-  }, { rootMargin: "-80px 0px -65% 0px" });
-  for (const id of ids) { const sec = $(id); if (sec) io.observe(sec); }
+    // A card with only a sliver in the band doesn't count: it is the one just scrolled past.
+    for (const e of entries) { if (e.isIntersecting && e.intersectionRect.height >= 8) inBand.add(e.target); else inBand.delete(e.target); }
+    update();
+  }, { rootMargin: "-80px 0px -65% 0px", threshold: [0, 0.01, 0.05, 0.1, 0.25, 0.5, 1] });
+  for (const c of cards) io.observe(c);
+  addEventListener("scroll", () => { if (atBottom()) update(); }, { passive: true });
+  for (const a of [...tabs, ...items]) {
+    a.addEventListener("click", () => {
+      const el = document.getElementById(a.getAttribute("href").slice(1));
+      const card = el?.matches(".group") ? el.querySelector(":scope > section") : el;
+      if (card) { activate(card); pinned = true; }
+    });
+  }
+  const unpin = () => { pinned = false; };
+  for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) addEventListener(type, (e) => { if (!e.target.closest?.(".tabs, .menu")) unpin(); }, { passive: true });
 }
 
 function yearTitle(y) { return y.partial ? `${y.i} (${mRange(y.a, y.b)}, so far)` : String(y.i); }
@@ -1166,15 +1194,13 @@ function renderYears(m) {
   const last = ys.at(-1);
   const best = ys.filter((y) => !y.partial).reduce((a, y) => (y.v > a.v ? y : a), ys[0]);
   const worst = ys.reduce((a, y) => (y.v < a.v ? y : a), ys[0]);
-  $("years-sub").textContent = `Net reported change per calendar year. Biggest net buying: ${best.i} (${signed(best.v)}). Biggest net selling: ${worst.i} (${signed(worst.v)}).`
-    + (last.partial ? ` ${last.i} runs to ${mLabel(last.b)} so far and is shown lighter.` : "");
-  const recent = ys.filter((y) => !y.partial && y.i >= 2022 && y.i <= 2024);
-  $("years-note").textContent = recent.length === 3
-    ? `For scale: the World Gold Council puts all central bank buying, disclosed or not, above 1,000 t a year in 2022–24. The reported totals here average ${signed(recent.reduce((a, y) => a + y.v, 0) / 3)} a year for those three years.`
-    : "";
+  $("years-sub").textContent = `Net reported change per calendar year. Most bought: ${best.i} (${signed(best.v)}); most sold: ${worst.i} (${signed(worst.v)}).`
+    + (last.partial ? ` ${last.i} so far, to ${mLabel(last.b)}, is lighter.` : "");
+  foldSummary("years", `Most bought ${best.i} (${signed(best.v)}), most sold ${worst.i} (${signed(worst.v)})`, last.partial ? `; ${last.i} so far ${signed(last.v)}` : null);
   columnChart($("chart-years"), {
     bars: ys.map((y) => ({ i: y.i, v: y.v, faded: y.partial, y })),
     axis: "years",
+    height: (W) => (W >= 500 ? 210 : 190),
     label: `Column chart of net reported central bank gold buying per calendar year, ${ys[0].i} to ${last.i}.`,
     tipTitle: (b) => yearTitle(b.y),
     tipRows: (b) => [
@@ -1204,10 +1230,11 @@ function renderMonthly(m) {
     bars.push({ i, v: mo.net, faded: i > m.complete, mo });
   }
   const pendingCount = m.newest - m.complete;
-  $("monthly-sub").textContent = "Net reported change each month, all holders together."
-    + (pendingCount ? ` The last ${pendingCount === 1 ? "bar is" : `${pendingCount} bars are`} lighter: those months are still being reported and are not in the totals.` : "");
+  $("monthly-sub").textContent = "The last 36 months, all holders together."
+    + (pendingCount ? ` The last ${pendingCount === 1 ? "bar is" : `${pendingCount} bars are`} lighter: still being reported, not in the totals.` : "");
   columnChart($("chart-monthly"), {
     bars,
+    height: (W) => (W >= 500 ? 210 : 190),
     label: `Column chart of monthly net reported central bank gold buying, ${mLabel(from)} to ${mLabel(m.newest)}.`,
     tipRows: (b) => [
       { value: signed(b.v), label: b.faded ? `so far (${pct(b.mo.coverage)} reported)` : "net, all holders", key: b.v >= 0 ? "buy" : "sell" },
@@ -1244,10 +1271,10 @@ function renderWho(m) {
   const buyers = sorted.filter((x) => x.v >= 0.5).slice(0, 8);
   const sellers = sorted.filter((x) => x.v <= -0.5).slice(-5);
   const rows = [...buyers, ...sellers].map((x) => ({ name: x.d.name, v: x.v, d: x.d }));
-  $("who-sub").textContent = `Change in reported holdings, ${mRange(m.win.from, m.win.to)}: the ${buyers.length} biggest buyers and ${sellers.length} biggest sellers. `
-    + `${mLabel(m.win.to)} is the last complete month, and every 12-month figure on the page uses this same window; filings after it show in the Top 15 table.`;
+  $("who-sub").textContent = `${mRange(m.win.from, m.win.to)}, the 12 months every figure on the page uses: the ${buyers.length} biggest buyers and ${sellers.length} biggest sellers.`;
   hbarChart($("chart-who"), {
     rows,
+    rowH: 26,
     splitAt: buyers.length && sellers.length ? buyers.length : 0,
     label: `Bar chart of the biggest changes in reported gold holdings, ${mRange(m.win.from, m.win.to)}.`,
     tipRows: (r) => [
@@ -1265,10 +1292,11 @@ function renderWho(m) {
 // split has told one story since about 2010, so it gets a small chart, not a section of its own.
 function renderGroups(m) {
   const series = GROUPS.map((g) => ({ name: g.name, cls: g.cls, points: m.groupRolling[g.key] }));
+  foldSummary("groups", `12 months to ${mLabel(series[0].points.at(-1).i)}: `, series.map((sr, k) => [k ? ", " : "", `${sr.name.toLowerCase()} `, sv(sr.points.at(-1).v)]));
   $("groups-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
   multiLineChart($("chart-groups"), {
     series,
-    height: 200,
+    height: 190,
     label: "Line chart of 12-month net reported gold buying by emerging and developing economies and by advanced economies.",
     tipExtra: (k) => [{ value: signed(series[0].points[k].v + series[1].points[k].v), label: "all holders" }],
   });
@@ -1283,7 +1311,7 @@ function renderMomentum(m, select) {
   const streaks = live.filter((d) => d.streak >= 2).sort((a, b) => b.streak - a.streak || b.latest - a.latest).slice(0, 8);
   const started = live.filter((d) => d.started).sort((a, b) => b.latest - a.latest);
   const stopped = live.filter((d) => d.stopped).sort((a, b) => b.lastBuy - a.lastBuy); // most recently quiet first
-  $("momentum-sub").textContent = `Streaks and buying months count each holder's own reports, up to its latest month. A purchase is a month with an increase of at least ${BUY_T} t.`;
+  $("momentum-sub").textContent = `From each holder's own reports, up to its latest month; a purchase is a month up at least ${BUY_T} t.`;
   const nameBtn = (d) => h("button", { type: "button", class: "holder-btn", onclick: () => select(d.code, true) }, d.name);
   const card = (title, items, row, empty) => h("div", { class: "list-card" }, h("h3", {}, title),
     items.length ? h("ul", {}, items.map((d) => h("li", {}, nameBtn(d), h("span", { class: "v" }, row(d))))) : h("p", {}, empty));
@@ -1395,8 +1423,7 @@ function renderMix(m, r) {
 function renderBoard(m, r, select) {
   const top = m.holders.slice().sort((a, b) => b.latest - a.latest).slice(0, TOP_N);
   const total = m.holders.filter((d) => !d.stale).reduce((a, d) => a + d.latest, 0);
-  $("board-sub").textContent = `The ${TOP_N} biggest holders that report to the IMF. The 12-month change runs to ${mLabel(m.complete)}, the last complete month, as everywhere on the page; `
-    + `"Since then" adds what each holder has filed after it, up to its own latest month (reporting lags differ). Uzbekistan, a large holder, does not report to this dataset and is missing.`;
+  $("board-sub").textContent = `12 months to ${mLabel(m.complete)}, the last complete month; "Since then" adds what each holder filed after it. Uzbekistan, a large holder, doesn't report to the IMF.`;
   const id = "board-caption";
   // The two change columns come straight after the name: on a phone only the first few columns fit.
   // The window header breaks onto two lines so both change columns fit a phone (the space before
@@ -1406,7 +1433,7 @@ function renderBoard(m, r, select) {
     const spark = [];
     for (let i = d.last - 35; i <= d.last; i++) { const v = m.valueAt(d, i); if (v !== undefined) spark.push(v); }
     const rx = r?.byCode.get(d.code);
-    return h("tr", {},
+    return h("tr", { "data-code": d.code },
       h("th", { scope: "row", class: "l" },
         h("span", { class: "rank" }, `${k + 1}. `),
         h("button", { type: "button", class: "holder-btn", onclick: () => select(d.code, true) }, d.name)),
@@ -1416,11 +1443,11 @@ function renderBoard(m, r, select) {
       h("td", {}, tonnes(d.latest)),
       h("td", {}, pct(d.latest / total)),
       r ? h("td", {}, rx ? pct(rx.latest.share) : "–") : null,
-      h("td", {}, spark.length > 1 ? sparkline(spark) : "–"));
+      h("td", {}, spark.length > 1 ? sparkline(spark, 84, 20) : "–"));
   });
   const wrap = h("div", { class: "table-wrap", tabindex: "0", role: "region", "aria-labelledby": id },
     h("table", {},
-      h("caption", { id }, "Largest reported gold holders. Select a name to see it in depth below."),
+      h("caption", { id }, "Largest reported gold holders. Select a name to see it in depth."),
       h("thead", {}, h("tr", {}, head.map((c, k) => h("th", { scope: "col", class: k === 0 ? "l" : null }, c)))),
       h("tbody", {}, rows)));
   $("board-table").replaceChildren(wrap, csvButton(wrap));
@@ -1434,6 +1461,7 @@ function dstat(label, value, note) {
 function renderCountry(m, r, code) {
   const d = m.holders.find((x) => x.code === code);
   if (!d) return;
+  for (const tr of document.querySelectorAll("#board-table tbody tr")) tr.classList.toggle("on", tr.dataset.code === code);
   const ranked = m.holders.slice().sort((a, b) => b.latest - a.latest);
   const rank = ranked.indexOf(d) + 1;
   const world = m.worldTotal.get(d.last) || 0;
@@ -1455,7 +1483,7 @@ function renderCountry(m, r, code) {
   const pts0 = [...d.s.entries()].sort((a, b) => a[0] - b[0]).map(([i, v]) => ({ i, v }));
   lineChart($("chart-country"), {
     points: pts0,
-    height: 260,
+    height: (W) => (W >= 480 ? 210 : 190),
     label: `Line chart of ${d.name}'s reported gold holdings, ${mLabel(pts0[0].i)} to ${mLabel(d.last)}.`,
     endLabel: (p) => tonnes(p.v),
     tipRows: (p) => {
@@ -1477,7 +1505,7 @@ function renderCountry(m, r, code) {
     columnChart($("chart-country-years"), {
       bars: yrs.map((y) => ({ ...y, faded: y.partial })),
       axis: "years",
-      height: 200,
+      height: 150,
       label: `Column chart of ${d.name}'s reported gold change per year.`,
       tipTitle: (b) => (b.partial ? `${b.i} (to ${mLabel(d.last)})` : String(b.i)),
       tipRows: (b) => [{ value: signed(b.v), label: "net change", key: b.v >= 0 ? "buy" : "sell" }],
@@ -1491,7 +1519,7 @@ function renderCountry(m, r, code) {
     $("country-share-h").textContent = `Gold as % of ${d.name}'s reserves`;
     lineChart($("chart-country-share"), {
       points: sp,
-      height: 200,
+      height: 150,
       fmtTick: pctTick,
       endLabel: (p) => pct(p.v),
       label: `Line chart of gold's share of ${d.name}'s official reserves.`,
@@ -1567,6 +1595,7 @@ function renderNotes(m, r) {
     topic("Reading the gauge",
       h("p", {}, "“Speeding up” compares the last three months, scaled to a year, with the 12-month total; within 15% of it (or within 20 t, when the total is small) counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars.")),
   );
+  foldSummary("method", `${$("notes").children.length} topics, from when a month counts to reading the gauge; sources, scripts and run logs`);
 }
 
 /* ---------- Breadth and concentration ---------- */
@@ -1575,9 +1604,8 @@ function renderBreadth(m) {
   const b = m.breadth;
   const now = b.at(-1), then = b.find((p) => p.i === now.i - 12);
   const peak = b.reduce((a, p) => (p.buyers > a.buyers ? p : a), b[0]);
-  $("breadth-sub").textContent = `Holders whose reported gold rose by at least ${BREADTH_T} t over the 12 months to each point, and holders whose gold fell by that much. `
-    + `${mLabel(now.i)}: ${now.buyers} adding, ${now.sellers} cutting` + (then ? ` (a year earlier ${then.buyers} and ${then.sellers})` : "")
-    + `. Most holders adding at once: ${peak.buyers}, in ${mLabel(peak.i)}. More buyers is a broader signal than the same few buying more.`;
+  $("breadth-sub").textContent = `Holders whose gold rose or fell by at least ${BREADTH_T} t over 12 months. ${mLabel(now.i)}: ${now.buyers} adding, ${now.sellers} cutting`
+    + (then ? ` (${then.buyers} and ${then.sellers} a year earlier)` : "") + `; most adding at once: ${peak.buyers}, ${mLabel(peak.i)}.`;
   const series = [
     { name: "Adding gold", cls: "buy", points: b.map((p) => ({ i: p.i, v: p.buyers })) },
     { name: "Cutting gold", cls: "sell", points: b.map((p) => ({ i: p.i, v: p.sellers })) },
@@ -1585,18 +1613,18 @@ function renderBreadth(m) {
   $("breadth-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
   multiLineChart($("chart-breadth"), {
     series,
+    height: 170,
     fmt: count,
     fmtTick: count,
     label: `Line chart of how many holders added or cut at least ${BREADTH_T} t of gold over 12 months, ${mLabel(b[0].i)} to ${mLabel(now.i)}.`,
     tipExtra: (k) => [{ value: signedCount(b[k].buyers - b[k].sellers), label: "adding minus cutting" }],
   });
 
-  $("concentration-sub").textContent = `Share of all gross reported buying over 12 months done by the two biggest buyers. ${mLabel(now.i)}: ${pct(now.share)} (${now.top.map((x) => x.d.name).join(" and ")}). `
-    + "When a few buyers carry the total, one of them stopping changes the picture.";
+  $("concentration-sub").textContent = `Of all gross 12-month buying: ${pct(now.share)} in ${mLabel(now.i)} (${now.top.map((x) => x.d.name).join(" and ")}). The higher it is, the more rests on two holders.`;
   const cs = b.filter((p) => p.gross >= 25); // with almost no buying, any two buyers are "all of it"
   lineChart($("chart-concentration"), {
     points: cs.map((p) => ({ i: p.i, v: p.share, p })),
-    height: 220,
+    height: 150,
     fmtTick: pctTick,
     yMax: 1,
     endLabel: (p) => pct(p.v),
@@ -1618,9 +1646,12 @@ function renderUpdates(changes) {
   const list = (changes || []).slice().reverse();
   if (!list.length) {
     $("updates-sub").textContent = "The daily job records each change it finds in the IMF figures here. None recorded yet.";
+    foldSummary("updates", "None recorded yet");
     put("updates-list");
     return;
   }
+  const dayStr = (e) => DAY.format(Date.parse(`${e.date}T00:00:00Z`));
+  foldSummary("updates", `${plural(list.length, "update")} since ${dayStr(list.at(-1))}, the latest on ${dayStr(list[0])}; an issue opens on big moves`);
   $("updates-sub").textContent = `Each time the daily job finds new or revised IMF figures, it records what changed. ${plural(list.length, "update")} since ${DAY.format(Date.parse(`${list.at(-1).date}T00:00:00Z`))}. `
     + "It also opens a GitHub issue, which GitHub emails, when a month enters the totals, the direction changes, or a holder moves 20 t or more in a month.";
   const item = (x) => {
@@ -1700,9 +1731,11 @@ function renderCompare(m, codes, mode, years) {
     : `Reported holdings in tonnes, ${mLabel(firstI)} to ${mLabel(lastI)}.`)
     + (lags.length ? ` ${lags.map((d) => `${d.name} has reported to ${mLabel(d.last)}`).join("; ")}, so its line ends earlier.` : "");
   $("cmp-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+  foldSummary("compare", `${ds.map((d) => d.name).join(", ")}: ${mode === "change" ? "change in holdings" : "reported holdings"}, ${mLabel(firstI)} to ${mLabel(lastI)}`);
   const fmt = mode === "change" ? signed : tonnes;
   multiLineChart($("chart-compare"), {
     series,
+    height: (W) => (W >= 800 ? 260 : 220),
     fmt,
     label: `Line chart comparing ${ds.map((d) => d.name).join(", ")}: ${mode === "change" ? "change in" : ""} reported gold holdings, ${mLabel(firstI)} to ${mLabel(lastI)}.`,
   });
@@ -2001,15 +2034,6 @@ function renderSupply(m, p, owidErr) {
 
   foldSummary("supply", lastS ? `Central banks reported ${signed(lastS.cb)} in ${lastS.i}, ${pct(lastS.v)} of the ${mined(lastS.yr.world)} mined worldwide` : `${mined(latest.world)} mined worldwide in ${latest.y}`);
 
-  // The headline row gets the share too: it is the one number here that moves with central banks.
-  const pace = document.querySelector('#stat-groups [data-group="Pace"]');
-  if (pace && lastS) {
-    pace.querySelector(".stat.supply")?.remove();
-    const st = stat("Share of mine output", pct(lastS.v), [`${lastS.i}: ${signed(lastS.cb)} reported, ${mined(lastS.yr.world)} mined`]);
-    st.classList.add("supply");
-    pace.append(st);
-  }
-
   if (share.length) {
     $("supply-share-sub").textContent = `Net reported central bank buying in each calendar year divided by world mine production that year, ${share[0].i} to ${lastS.i}. `
       + "Below zero, central banks were net sellers. Reported buying only: the World Gold Council's estimate of all central bank buying (over 1,000 t a year in 2022–24) would be about a third of mine output."
@@ -2159,8 +2183,7 @@ function renderJournal(m, j) {
   const since = m.turn ?? all[0].i;
   const recent = all.filter((p) => p.i >= since);
   const belowRecent = recent.filter((p) => p.v < t).length;
-  $("journal-sub").textContent = `Your line is ${signed(t)} of reported net buying over 12 months${j.trigger.set ? `, set ${DAY.format(dayOf(j.trigger.set))}` : ""}. `
-    + `${j.trigger.why || ""} The dashed line on the trend chart is this level; the diamonds are your journal entries.`;
+  $("journal-sub").textContent = `Your line: ${signed(t)} of 12-month net reported buying${j.trigger.set ? `, set ${DAY.format(dayOf(j.trigger.set))}` : ""}${triggerIsPlaceholder() ? " (a placeholder)" : ""}. ${j.trigger.why || ""}`;
   put("journal-stats",
     dstat("Your trigger", signed(t), triggerIsPlaceholder() ? "placeholder · 12-month net reported buying" : "12-month net reported buying"),
     dstat("Gauge now", signed(k.r12), cur ? `below the line since ${mLabel(cur.from)}` : `${tonnes(k.r12 - t)} above the line`),
@@ -2168,6 +2191,9 @@ function renderJournal(m, j) {
     dstat("Months below the line", `${belowRecent} of ${recent.length}`, `since ${mLabel(since)}`));
   const r12 = new Map(all.map((p) => [p.i, p.v]));
   const entries = journalEntries().reverse();
+  foldSummary("journal", `Trigger ${signed(t)}${triggerIsPlaceholder() ? " (placeholder)" : ""}, `,
+    cur ? h("span", { class: "neg" }, `▼ below it since ${mLabel(cur.from)}`) : h("span", { class: "pos" }, `▲ ${tonnes(k.r12 - t)} above`),
+    ` · ${plural(entries.length, "entry", "entries")}`);
   put("journal-list", entries.length ? h("ul", { class: "journal" }, entries.map((e) => {
     const at = Math.min(e.i, m.complete); // the gauge as the data reads now, at the latest complete month then
     return h("li", {},
@@ -2175,9 +2201,8 @@ function renderJournal(m, j) {
       h("p", {}, e.text));
   })) : h("p", { class: "chart-note" }, "No entries yet."));
   $("journal-note").replaceChildren("To change the trigger or add an entry, edit ", h("a", { href: JOURNAL_EDIT }, "data/journal.json"),
-    " on GitHub (a date and a sentence per entry) and commit to main; GitHub Pages rebuilds the page within a minute. ",
-    triggerIsPlaceholder() ? "The level is still a placeholder: set your own and delete the line \"placeholder\": true. " : null,
-    "A year on, the list shows whether acting on the gauge helped.");
+    " on GitHub: a date and a sentence per entry. ",
+    triggerIsPlaceholder() ? "Once you set your own level, delete its line \"placeholder\": true." : null);
   put("table-journal", runs.length ? tableDetails("Show the periods below the line as a table",
     table(`Periods when the 12-month net was below your trigger (${signed(t)})`, ["From", "To", "Months", "Lowest"],
       runs.slice().reverse().map((x) => [mLabel(x.from), x.to === now.i ? `${mLabel(x.to)} (now)` : mLabel(x.to), count(x.to - x.from + 1), sv(x.low.v)]))) : null);
@@ -2231,7 +2256,7 @@ const monthEnd = (key) => { const i = idx(key) + 1; return Date.UTC(yearOf(i), i
 const median = (a) => { if (!a.length) return undefined; const q = a.slice().sort((x, y) => x - y), k = q.length >> 1; return q.length % 2 ? q[k] : (q[k - 1] + q[k]) / 2; };
 const emptyChart = (el, text) => { el.chartObserver?.disconnect(); el.replaceChildren(text ? h("p", { class: "chart-note" }, text) : null); };
 
-function renderQuality(m, changes) {
+function renderQuality(m, changes, log) {
   const entries = (changes || []).filter((e) => e.date).slice().sort((a, b) => a.date.localeCompare(b.date));
   const byCode = new Map(m.holders.map((d) => [d.code, d]));
   // Every figure that arrived since the log began, against what the IMF shows for it now; every
@@ -2285,6 +2310,15 @@ function renderQuality(m, changes) {
 
   // The calendar: who still has to file for the next month to count, and how late each usually is.
   const { active, totalA, next, missing, need } = nextToComplete(m);
+  const c = checksInfo(log);
+  put("checks-stats", c ? [
+    dstat("Daily checks", `${c.passed} of ${c.runs} passed`, "runs logged in data/fetch_log.csv"),
+    dstat("Last run", `${c.age} ago`, `${DAY.format(c.lastT)}, ${c.hhmm} UTC, ${c.result}`),
+    dstat("Days with no run", count(c.missed.length), c.missed.length ? c.missed.slice(-3).map((t) => DAY.format(t)).join(", ") : `due daily at 06:23 UTC, ${RUN_GRACE_H} h grace`),
+  ] : dstat("Daily checks", "–", "no run log found"));
+  foldSummary("quality",
+    next === null ? `Every month to ${mLabel(m.newest)} is complete` : `${mLabel(next)} is ${pct(m.months.get(next).coverage)} reported${need.length ? `, waiting on ${need.slice(0, 2).map((d) => d.name).join(" and ")}${need.length > 2 ? " and others" : ""}` : ""}`,
+    c ? [" · daily checks ", h("span", { class: c.ok ? "pos" : "neg" }, `${c.passed} of ${c.runs} passed`)] : null);
   const typical = (code) => median(lags.get(code) || []);
   const allLags = [...lags.values()].flat();
   const behind = active.filter((d) => m.newest - d.last >= 2).length;
@@ -2413,10 +2447,11 @@ function renderUnreported(m, wgc) {
   const sumW = (a) => a.reduce((t, x) => t + x.v, 0), sumR = (a) => a.reduce((t, x) => t + x.rep, 0);
   const hidden = (w, rp) => (w > 0 ? pct(Math.max(0, 1 - rp / w)) : "–");
   const latestY = ys.filter((x) => x.rep !== null).at(-1);
-  $("unreported-sub").textContent = latest
-    ? `The World Gold Council estimates all central bank buying, including purchases no country reports; this page counts only what reaches the IMF. ${qName(latest.q)}: WGC ${signed(latest.v)}, reported ${signed(latest.rep)}, so about ${hidden(latest.v, latest.rep)} of the quarter's buying was not disclosed by country. `
-      + `Over the last ${plural(last4.length, "quarter")}: ${signed(sumW(last4))} estimated against ${signed(sumR(last4))} reported (${hidden(sumW(last4), sumR(last4))} undisclosed).`
-    : "The World Gold Council's estimate of all central bank buying against what is reported to the IMF.";
+  $("unreported-sub").textContent = "The WGC's estimate of all central bank buying, including purchases no country reports, against what reaches the IMF."
+    + (last4.length ? ` Last ${plural(last4.length, "quarter")}: ${signed(sumW(last4))} estimated, ${signed(sumR(last4))} reported.` : "");
+  foldSummary("unreported", last4.length
+    ? `${hidden(sumW(last4), sumR(last4))} of the WGC's estimate not disclosed by country over the last ${plural(last4.length, "quarter")} (${signed(sumW(last4))} vs ${signed(sumR(last4))} reported)`
+    : "The WGC's estimate of all central bank buying against what is reported");
   put("unreported-stats",
     latest ? dstat(`WGC estimate, ${qName(latest.q)}`, signed(latest.v), `from the ${latest.from} report`) : null,
     latest ? dstat(`Reported to the IMF, ${qName(latest.q)}`, signed(latest.rep), "this page's count") : null,
@@ -2424,22 +2459,22 @@ function renderUnreported(m, wgc) {
     latestY ? dstat(`${latestY.y}, whole year`, `${signed(latestY.v)} vs ${signed(latestY.rep)}`, `WGC estimate vs reported · ${hidden(latestY.v, latestY.rep)} undisclosed`) : null);
   if (qs.length >= 4) {
     const series = [
-      { name: "WGC estimate, all central banks", cls: "s2", points: qs.map((x) => ({ i: x.i, v: x.v, q: x.q })) },
-      { name: "Reported to the IMF (this page)", cls: "", points: qs.map((x) => ({ i: x.i, v: x.rep, q: x.q })) },
+      { name: "WGC estimate, all buying", cls: "s2", points: qs.map((x) => ({ i: x.i, v: x.v, q: x.q })) },
+      { name: "Reported to the IMF", cls: "", points: qs.map((x) => ({ i: x.i, v: x.rep, q: x.q })) },
     ];
     $("unreported-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
     multiLineChart($("chart-unreported"), {
-      series, height: 240, tipTitle: (p) => qName(p.q),
+      series, height: (W) => (W >= 500 ? 200 : 180), tipTitle: (p) => qName(p.q),
       label: `Line chart of quarterly central bank gold buying, World Gold Council estimate against the IMF-reported total, ${qName(qs[0].q)} to ${qName(qs.at(-1).q)}.`,
       tipExtra: (k) => (qs[k].rep !== null ? [{ value: hidden(qs[k].v, qs[k].rep), label: "not disclosed by country" }] : [{ value: "–", label: "quarter not yet complete in the IMF data" }]),
     });
   } else emptyChart($("chart-unreported"));
   // The Overview's caveat gets the measured share instead of a typed-in number that would go stale.
   if (last4.length && $("caveat-text")) {
-    $("caveat-text").textContent = `The World Gold Council estimates that most central bank buying is not disclosed by country (${hidden(sumW(last4), sumR(last4))} of its estimate over the last ${plural(last4.length, "quarter")} it has reported, to ${qName(latest.q)}), so the real total is larger than this.`;
+    $("caveat-text").textContent = `The World Gold Council puts ${hidden(sumW(last4), sumR(last4))} of central bank buying in the last ${plural(last4.length, "quarter")} it has reported (to ${qName(latest.q)}) as not disclosed by country, so the true total is larger: read these figures for direction and pace.`;
   }
-  $("unreported-note").replaceChildren(`Hand-kept: the WGC figures are typed in from its Gold Demand Trends report pages (the data tables behind them need a login), each the latest revision found there${wgc.entered ? `, last entered ${DAY.format(dayOf(wgc.entered))}` : ""}. `,
-    "The WGC revises past quarters as buying comes to light, sometimes by a lot. Edit ", h("a", { href: "https://github.com/Vasuki8/gold-tracker/edit/main/data/wgc_central_banks.json" }, "data/wgc_central_banks.json"), " after each quarterly report.");
+  $("unreported-note").replaceChildren(`Typed in by hand from the WGC's Gold Demand Trends${wgc.entered ? `, last on ${DAY.format(dayOf(wgc.entered))}` : ""}; it revises past quarters, sometimes by a lot. Edit `,
+    h("a", { href: "https://github.com/Vasuki8/gold-tracker/edit/main/data/wgc_central_banks.json" }, "data/wgc_central_banks.json"), " after each quarterly report.");
   const row = (x, name) => [name, signed(x.v), x.rep === null ? "–" : signed(x.rep), x.rep === null ? "–" : hidden(x.v, x.rep), x.from];
   put("table-unreported",
     qs.length ? tableDetails("Show quarters as a table", table("Quarterly central bank buying: WGC estimate vs reported to the IMF, tonnes", ["Quarter", "WGC estimate", "Reported", "Not disclosed", "WGC figure from"],
@@ -2464,6 +2499,9 @@ async function getLog(url) {
 }
 
 async function main() {
+  // Before anything draws: on a phone the less important cards start closed (data-open-wide in
+  // index.html); a chart inside one draws when it is opened, like the Context tiles.
+  if (!matchMedia("(min-width: 721px)").matches) for (const d of document.querySelectorAll("details[data-open-wide]")) d.open = false;
   let raw, rr = null, log = null, changes = null, journal = null, tic = null, cofer = null, wgc = null;
   try {
     [raw, rr, log, changes, journal, tic, cofer, wgc] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null),
@@ -2480,9 +2518,9 @@ async function main() {
   const r = buildReserves(rr, m);
   JOURNAL = journal;
   renderHero(m);
+  renderKpis(m);
   renderLatest(m, changes);
-  renderStatGroups(m, r, log);
-  renderFreshness(m);
+  renderHealth(checksInfo(log));
   renderRolling(m, r);
   wireTrendRange(m, r);
   renderJournal(m, journal);
@@ -2490,7 +2528,7 @@ async function main() {
   renderYears(m);
   renderMonthly(m);
   renderUpdates(changes);
-  renderQuality(m, changes);
+  renderQuality(m, changes, log);
   renderWho(m);
   renderGroups(m);
 
@@ -2505,7 +2543,8 @@ async function main() {
     sel.value = code;
     renderCountry(m, r, code);
     setParam("holder", code === defaultHolder ? null : code);
-    if (scroll) $("country").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    // On a wide screen the holder card sits beside the table, so only scroll when it is out of view.
+    if (scroll) $("country").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" });
   };
   sel.addEventListener("change", () => select(sel.value, false));
   renderMomentum(m, select);
