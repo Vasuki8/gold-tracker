@@ -10,6 +10,11 @@ const DATA_URL = "data/gold_tonnes.json";
 const RESERVES_URL = "data/reserves_usd.json";
 const CHANGES_URL = "data/changes.json";
 const PRODUCTION_URL = "data/production_usgs.json";
+const JOURNAL_URL = "data/journal.json"; // the owner's trigger level and notes, edited by hand
+const TIC_URL = "data/treasuries_tic.json"; // foreign official holdings of US Treasuries (monthly job)
+const COFER_URL = "data/cofer_shares.json"; // currency shares of world FX reserves (monthly job)
+const WGC_URL = "data/wgc_central_banks.json"; // WGC estimate of all central bank buying, typed in by hand
+const CFTC_FILE = "data/cftc_gold.json"; // COMEX positions committed by the weekly job; the API below is the fallback
 // Our World in Data: gold mine production in tonnes, by country, 1900 onward (USGS plus British
 // Geological Survey figures). An indicator id: a new OWID dataset version may move it.
 const OWID_PROD = "https://api.ourworldindata.org/v1/indicators/1131111";
@@ -441,7 +446,7 @@ function fillTip(tip, title, rows) {
   tip.replaceChildren(
     h("div", { class: "tt-title" }, title),
     ...rows.map((r) => (r === "sep" ? h("div", { class: "tt-sep" })
-      : h("div", { class: "tt-row" },
+      : h("div", { class: `tt-row${r.note ? " tt-note" : ""}` }, // note: a sentence that may wrap
         r.key ? h("span", { class: `tt-key ${r.key}` }) : null,
         h("strong", {}, r.value),
         r.label ? h("span", { class: "tt-label" }, r.label) : null))),
@@ -542,7 +547,7 @@ function hbarPath(x0, x1, y, ht, r = 4) {
 
 function lineChart(container, opts) {
   const { points, label, height = 280, endLabel, tipRows, tipTitle = (p) => mLabel(p.i), fmtTick = tickText,
-    cls = "", bands = [], marks = [], yMax, domain, zero = true } = opts;
+    cls = "", bands = [], marks = [], rules = [], flags = [], yMax, domain, zero = true } = opts;
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
     const M = { t: marks.length ? 30 : 14, r: endLabel ? (narrow ? 60 : 72) : 16, b: 30, l: 52 };
@@ -552,7 +557,7 @@ function lineChart(container, opts) {
     const X = (i) => M.l + (x1 === x0 ? pw / 2 : ((i - x0) / (x1 - x0)) * pw);
     // zero: false lets a level series (a fund's tonnes) fill the height. Fine for a line, which is
     // read by its shape; bars always start at zero.
-    const vs = points.map((p) => p.v);
+    const vs = [...points.map((p) => p.v), ...rules.map((r) => r.v)]; // a reference line must stay in view
     const yt = zero ? niceTicks(Math.min(0, ...vs), Math.max(0, ...vs, yMax ?? -Infinity), narrow ? 4 : 5)
       : niceTicks(Math.min(...vs), Math.max(...vs), narrow ? 4 : 5);
     const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
@@ -565,6 +570,12 @@ function lineChart(container, opts) {
     }
     yGrid(svg, yt, Y, M.l, M.l + pw, fmtTick);
     yearAxis(svg, x0, x1, (i) => X(i), M.t + ph);
+    // Reference lines (the owner's trigger level): a dashed hairline, labelled at the right.
+    for (const r of rules) {
+      if (r.v < yt.lo || r.v > yt.hi) continue;
+      svg.append(s("line", { x1: M.l, x2: M.l + pw, y1: Y(r.v), y2: Y(r.v), class: "rule" }));
+      if (r.label) svg.append(s("text", { x: M.l + pw - 4, y: Y(r.v) - 5, class: "rule-label", "text-anchor": "end" }, r.label));
+    }
     // Numbered markers: a hairline at the month, a numbered circle above the plot. Circles that
     // would overlap slide right and keep a short leader back to their month.
     let prevCx = -Infinity;
@@ -587,6 +598,14 @@ function lineChart(container, opts) {
     );
     const last = points.at(-1);
     svg.append(s("circle", { cx: X(last.i), cy: Y(last.v), r: 4, class: `dot ${cls}` }));
+    // Journal flags: a hollow diamond on the line at the entry's month.
+    for (const f of flags) {
+      if (f.i < x0 || f.i > x1) continue;
+      const p = points.find((q) => q.i === f.i) || points.findLast((q) => q.i <= f.i);
+      if (!p) continue;
+      const x = X(p.i), y = Y(p.v);
+      svg.append(s("path", { d: `M${x},${y - 8}L${x + 7},${y}L${x},${y + 8}L${x - 7},${y}Z`, class: "flag" }));
+    }
     if (endLabel) {
       svg.append(s("text", { x: X(last.i) + 9, y: Y(last.v), class: "end-label", "dominant-baseline": "middle" }, endLabel(last)));
     }
@@ -696,6 +715,11 @@ function columnChart(container, { bars, label, height = 240, tipRows, tipTitle =
           svg.append(s("text", { x: bx(k) + band / 2, y: M.t + ph + 18, class: "tick", "text-anchor": "middle" }, String(b.i)));
         }
       });
+    } else if (axis === "labels") {
+      const every = band >= 26 ? 1 : 2; // each bar carries its own label (calendar months)
+      bars.forEach((b, k) => {
+        if (k % every === 0) svg.append(s("text", { x: bx(k) + band / 2, y: M.t + ph + 18, class: "tick", "text-anchor": "middle" }, b.label));
+      });
     } else {
       const i0 = bars[0].i;
       yearAxis(svg, i0, bars.at(-1).i, (i) => bx(i - i0), M.t + ph, band / 2);
@@ -775,6 +799,48 @@ function hbarChart(container, { rows, label, tipRows, splitAt, fmt = signed, neu
       },
       hide() { on?.classList.remove("on"); on = null; tip.hidden = true; },
     });
+    return svg;
+  });
+}
+
+// Dots on two numeric axes. The pointer picks the nearest dot within 28px (not the nearest
+// column, as in the other charts), so a cloud of months reads one month at a time.
+function scatterChart(container, { points, label, height = 300, fmtX = pctTick, fmtY = tickText, xLabel, yLabel, cls = () => "", tipTitle, tipRows }) {
+  mountChart(container, (W, tip) => {
+    const narrow = W < 520;
+    const M = { t: 14, r: 16, b: 40, l: 52 };
+    const pw = W - M.l - M.r, ph = height - M.t - M.b;
+    const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+    const xt = niceTicks(Math.min(0, ...xs), Math.max(0, ...xs), narrow ? 4 : 6);
+    const yt = niceTicks(Math.min(0, ...ys), Math.max(0, ...ys), narrow ? 4 : 5);
+    const X = (v) => M.l + ((v - xt.lo) / (xt.hi - xt.lo)) * pw;
+    const Y = (v) => M.t + ph - ((v - yt.lo) / (yt.hi - yt.lo)) * ph;
+    const svg = s("svg", { width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": label });
+    yGrid(svg, yt, Y, M.l, M.l + pw, fmtY);
+    for (const v of xt.ticks) {
+      svg.append(s("line", { x1: X(v), x2: X(v), y1: M.t, y2: M.t + ph, class: v === 0 ? "baseline" : "gridline" }),
+        s("text", { x: X(v), y: M.t + ph + 18, class: "tick", "text-anchor": "middle" }, fmtX(v)));
+    }
+    if (xLabel) svg.append(s("text", { x: M.l + pw, y: M.t + ph + 34, class: "tick", "text-anchor": "end" }, xLabel));
+    if (yLabel) svg.append(s("text", { x: M.l + 6, y: M.t + 4, class: "tick" }, yLabel));
+    const dots = points.map((p) => {
+      const d = s("circle", { cx: X(p.x), cy: Y(p.y), r: 4, class: `dot ${cls(p)}` });
+      svg.append(d);
+      return d;
+    });
+    let on = null;
+    const hide = () => { on?.setAttribute("r", 4); on = null; tip.hidden = true; };
+    svg.addEventListener("pointermove", (ev) => {
+      const r = svg.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      let best = -1, bd = 28 * 28;
+      points.forEach((p, k) => { const d = (X(p.x) - mx) ** 2 + (Y(p.y) - my) ** 2; if (d < bd) { bd = d; best = k; } });
+      if (best < 0) { hide(); return; }
+      on?.setAttribute("r", 4);
+      on = dots[best]; on.setAttribute("r", 6);
+      fillTip(tip, tipTitle(points[best]), tipRows(points[best]));
+      placeTip(tip, container, X(points[best].x), Y(points[best].y));
+    });
+    svg.addEventListener("pointerleave", hide);
     return svg;
   });
 }
@@ -934,7 +1000,8 @@ function renderStatGroups(m, r, log) {
     group("Pace",
       stat("Last 3 months", signed(k.r3), [mRange(k.c - 2, k.c), delta(k.pace - k.r12, `${word.text} · ${signed(k.pace)} a year`, Math.max(0.15 * Math.abs(k.r12), 20))], tone(k.r3)),
       stat(`${mLabel(k.c)}`, signed(last.net), [`Biggest: ${last.contrib.slice(0, 2).map(({ d, c }) => `${d.name} ${signed(c)}`).join(", ")}`], tone(last.net)),
-      stat("Months of net buying", `${buyingMonths} of 12`, [`Net selling in ${12 - buyingMonths}`])),
+      stat("Months of net buying", `${buyingMonths} of 12`, [`Net selling in ${12 - buyingMonths}`]),
+      triggerStat(k)),
     group("Who",
       stat("Top two share", pct(k.share), [`of gross reported buying: ${k.top2.map((x) => x.d.name).join(" and ")}`,
         h("div", { class: "meter", role: "img", "aria-label": `${pct(k.share)} share` }, h("span", { style: `width:${(k.share * 100).toFixed(1)}%` }))]),
@@ -973,13 +1040,19 @@ function renderRolling(m, r, years = 0) {
     endLabel: (p) => signed(p.v),
     bands: m.turn ? [{ from: pts12[0].i, to: m.turn, label: "Net selling, led by European central banks" }] : [],
     marks: m.marks,
+    rules: Number.isFinite(JOURNAL?.trigger?.t) ? [{ v: JOURNAL.trigger.t, label: `Your trigger ${signed(JOURNAL.trigger.t)}` }] : [],
+    flags: journalEntries(),
     tipRows: (p) => [
       { value: signed(p.v), label: "12-month net", key: "line" },
       { value: signed(m.months.get(p.i).net), label: "that month" },
+      ...journalEntries().filter((e) => e.i === p.i).flatMap((e) => ["sep", { value: "◆", label: e.text, note: true }]),
     ],
   });
   const shown = m.marks.filter((mk) => mk.i >= pts12[0].i);
-  put("marks-key", shown.map((mk) => h("li", {}, h("span", { class: "n", "aria-hidden": "true" }, String(mk.n)), h("span", {}, mk.text))));
+  const flagged = journalEntries().filter((e) => e.i >= pts12[0].i && e.i <= pts12.at(-1).i).length;
+  put("marks-key", shown.map((mk) => h("li", {}, h("span", { class: "n", "aria-hidden": "true" }, String(mk.n)), h("span", {}, mk.text))),
+    Number.isFinite(JOURNAL?.trigger?.t) ? h("li", {}, h("span", { class: "n key-rule", "aria-hidden": "true" }), h("span", {},
+      `Dashed line: your trigger, ${signed(JOURNAL.trigger.t)} over 12 months`, flagged ? `; ◆ ${plural(flagged, "journal entry", "journal entries")}` : "", " (", h("a", { href: "#journal" }, "Journal"), ").")) : null);
   const yearly = all.filter((p) => p.i % 12 === 11 || p.i === all.at(-1).i).reverse();
   $("table-rolling").replaceChildren(tableDetails("Show as a table",
     table("12-month net reported buying, at each December and the latest month", ["Month", "12-month net"],
@@ -1399,6 +1472,16 @@ function renderNotes(m, r) {
     h("p", {}, "Countries value their gold differently, so the reported dollar values can't be used as they are. This page takes one price per month, the median dollars per ounce across all holders with at least 1 t (it tracks the market price), revalues every holder's gold at it, and replaces the reported gold value inside total reserves with that market value."),
     revalued.length ? h("p", {}, `Holders whose own value is more than 10% off that price, mostly because they use an old official price or historical cost: ${revalued.map((x) => x.name).join(", ")}. The US, for example, values its gold at the statutory $42.22 an ounce.`) : null,
     r ? h("p", {}, `The world line starts in ${mLabel(r.worldSeries[0].i)}, when today's reporters first cover ${pct(COVERAGE_MIN)} of reserves, and ends at ${mLabel(r.complete)}, the latest month that is ${pct(COVERAGE_MIN)} reported.`) : null,
+    h("h3", {}, "Your trigger and journal"),
+    h("p", {}, "data/journal.json is the owner's file: a trigger level (12-month net reported buying, in tonnes) and dated notes. The trend chart draws the level as a dashed line and each note as a diamond in its month; the Journal section lists the notes with the gauge as it read then and the periods when the gauge was below the line. Edit the file on GitHub to change either."),
+    h("h3", {}, "Buying and the price"),
+    h("p", {}, "Each complete month since net buying took hold is one dot: the implied gold price's change over the month against the reported net change in holdings. The correlation is Pearson's, on monthly figures. Months are grouped by price move at ±3%. Seasonality averages the reported change for each calendar month over whole years only."),
+    h("h3", {}, "Revisions and who is late"),
+    h("p", {}, "Every figure that first appeared in data/changes.json is compared with the figure the IMF shows for that holder and month now; a difference of 0.05 t or more, or a withdrawn figure, counts as a revision. The delay a holder's figures usually take is the median gap between a month's end and the day its figure first arrived, so it needs a few filings per holder before it shows. 'Filers needed' adds the missing holders in order of activity weight until the next month would reach 90%."),
+    h("h3", {}, "Treasuries and reserve currencies"),
+    h("p", {}, "Foreign official holdings of US Treasuries come from the US Treasury's TIC 'Major Foreign Holders' tables (monthly, US$ billions, attributed to the custodian's country, so Belgium and Luxembourg stand in for others). Reserve currency shares come from the IMF's COFER: the share of foreign exchange reserves whose currency is reported, so gold is not in them. A monthly job fetches both (scripts: spike/fetch_tic.py, spike/fetch_cofer.py; logs: data/fetch_log_tic.csv, data/fetch_log_cofer.csv), separate from the daily gold job."),
+    h("h3", {}, "Reported against the World Gold Council's estimate"),
+    h("p", {}, "The WGC's Gold Demand Trends estimates total central bank buying each quarter, including purchases not reported by any country, from its own research and trade data. Its figures are typed into data/wgc_central_banks.json by hand from the report pages, each the latest revision found there. 'Reported' is this page's sum of monthly net changes over the quarter; the undisclosed share is one minus reported over estimated."),
     h("h3", {}, "Reading the gauge"),
     h("p", {}, "\"Speeding up\" compares the last three months, scaled to a year, with the 12-month total; within 15% counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars."),
   );
@@ -1699,7 +1782,8 @@ function renderCFTC(weeks, years) {
     label: `Line chart of net COMEX gold futures positions in tonnes by trader type, ${DAY.format(shown[0].t)} to ${DAY.format(last.t)}.`,
   });
   $("cftc-note").textContent = "Net position = long minus short contracts, converted at 100 troy ounces a contract. Funds (managed money) are usually net long and their swings are the speculative bet; "
-    + "banks and producers mostly sit on the other side. Source: CFTC Commitments of Traders, disaggregated futures only, weekly (Tuesday positions, published Friday).";
+    + "banks and producers mostly sit on the other side. Source: CFTC Commitments of Traders, disaggregated futures only, weekly (Tuesday positions, published Friday)"
+    + (weeks.fromRepo ? "; from this repo's weekly job (data/cftc_gold.json), which also opens an alert when the funds' position moves a lot." : "; loaded by your browser from the CFTC's API.");
   // The last report of each month, for the table.
   return shown.filter((w, k, a) => k === a.length - 1 || new Date(w.t).getUTCMonth() !== new Date(a[k + 1].t).getUTCMonth()).reverse();
 }
@@ -1726,6 +1810,14 @@ async function loadFunds() {
       return readGLD(await res.arrayBuffer());
     })(),
     (async () => {
+      // The weekly job commits the CFTC data; the live API is the fallback when the file is missing or stale.
+      try {
+        const f = await getJSON(CFTC_FILE);
+        const col = Object.fromEntries(f.columns.map((c, k) => [c, k]));
+        const w = f.weeks.map((r) => ({ t: Date.parse(`${r[col.date]}T00:00:00Z`), oi: r[col.open_interest],
+          mm: r[col.mm_long] - r[col.mm_short], sd: r[col.swap_long] - r[col.swap_short], pm: r[col.prod_long] - r[col.prod_short] }));
+        if (w.length >= 100 && Date.now() - w.at(-1).t < 21 * DAY_MS) return Object.assign(w, { fromRepo: true });
+      } catch { /* fall through to the live API */ }
       const res = await fetch(CFTC_URL);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const w = readCFTC(await res.json());
@@ -1735,7 +1827,8 @@ async function loadFunds() {
   ]);
   if (g.status === "fulfilled") gld = g.value; else { fail("chart-gld", "the GLD archive from spdrgoldshares.com", g.reason); put("gld-stats"); }
   if (c.status === "fulfilled") cftc = c.value; else { fail("chart-cftc", "CFTC data from publicreporting.cftc.gov", c.reason); put("cftc-stats"); }
-  $("funds-sub").textContent = "Market data, not central banks: what investors and traders hold. Loaded by your browser straight from the sources each time the page opens, so it is as fresh as they are and nothing is stored in this repo.";
+  $("funds-sub").textContent = "Market data, not central banks: what investors and traders hold. The GLD archive is loaded by your browser straight from the source each time the page opens (its terms don't allow storing it here); "
+    + "the CFTC positions come from this repo's weekly job, with the CFTC's API as the fallback.";
   draw();
 }
 
@@ -1935,6 +2028,348 @@ async function loadProduction(m, r) {
 
 /* ---------- Boot ---------- */
 
+/* ---------- Your trigger and journal (data/journal.json, edited by hand) ---------- */
+
+let JOURNAL = null; // set in main() before the trend and stat groups draw
+const JOURNAL_EDIT = "https://github.com/Vasuki8/gold-tracker/edit/main/data/journal.json";
+const dayOf = (iso) => Date.parse(`${iso}T00:00:00Z`);
+const journalEntries = () => (JOURNAL?.entries || []).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") && e.text)
+  .map((e) => ({ ...e, i: idx(e.date.slice(0, 7)) })).sort((a, b) => a.date.localeCompare(b.date));
+
+function triggerStat(k) {
+  const t = JOURNAL?.trigger?.t;
+  if (!Number.isFinite(t)) return null;
+  const gap = k.r12 - t;
+  return stat("Your trigger", signed(t), [
+    gap >= 0 ? h("span", { class: "pos" }, `▲ ${tonnes(gap)} above it`) : h("span", { class: "neg" }, `▼ ${tonnes(-gap)} below it: re-read your case`),
+    h("a", { href: "#journal" }, "Journal and trigger"),
+  ]);
+}
+
+function renderJournal(m, j) {
+  const sec = $("journal");
+  if (!j || !Number.isFinite(j.trigger?.t)) { sec.hidden = true; return; }
+  const t = j.trigger.t, k = headline(m), all = m.rolling12, now = all.at(-1);
+  // Runs of months below the line, oldest first.
+  const runs = [];
+  for (const p of all) {
+    if (p.v >= t) continue;
+    const last = runs.at(-1);
+    if (last && last.to === p.i - 1) { last.to = p.i; if (p.v < last.low.v) last.low = p; } else runs.push({ from: p.i, to: p.i, low: p });
+  }
+  const cur = runs.length && runs.at(-1).to === now.i ? runs.at(-1) : null;
+  const lastRun = cur ? runs.at(-2) : runs.at(-1);
+  const since = m.turn ?? all[0].i;
+  const recent = all.filter((p) => p.i >= since);
+  const belowRecent = recent.filter((p) => p.v < t).length;
+  $("journal-sub").textContent = `Your line is ${signed(t)} of reported net buying over 12 months${j.trigger.set ? `, set ${DAY.format(dayOf(j.trigger.set))}` : ""}. `
+    + `${j.trigger.why || ""} The dashed line on the trend chart is this level; the diamonds are your journal entries.`;
+  put("journal-stats",
+    dstat("Your trigger", signed(t), "12-month net reported buying"),
+    dstat("Gauge now", signed(k.r12), cur ? `below the line since ${mLabel(cur.from)}` : `${tonnes(k.r12 - t)} above the line`),
+    dstat("Last time below", lastRun ? (lastRun.from === lastRun.to ? mLabel(lastRun.from) : mRange(lastRun.from, lastRun.to)) : "never", lastRun ? `${plural(lastRun.to - lastRun.from + 1, "month")}, low ${signed(lastRun.low.v)}` : `since ${mLabel(all[0].i)}`),
+    dstat("Months below the line", `${belowRecent} of ${recent.length}`, `since ${mLabel(since)}`));
+  const r12 = new Map(all.map((p) => [p.i, p.v]));
+  const entries = journalEntries().reverse();
+  put("journal-list", entries.length ? h("ul", { class: "journal" }, entries.map((e) => {
+    const at = Math.min(e.i, m.complete); // the gauge as the data reads now, at the latest complete month then
+    return h("li", {},
+      h("p", { class: "journal-when" }, DAY.format(dayOf(e.date)), r12.has(at) ? h("span", { class: "muted" }, ` · 12-month net to ${mLabel(at)}: ${signed(r12.get(at))}`) : null),
+      h("p", {}, e.text));
+  })) : h("p", { class: "chart-note" }, "No entries yet."));
+  $("journal-note").replaceChildren("To change the trigger or add an entry, edit ", h("a", { href: JOURNAL_EDIT }, "data/journal.json"),
+    " on GitHub (a date and a sentence per entry) and commit to main; GitHub Pages rebuilds the page within a minute. A year on, the list shows whether acting on the gauge helped.");
+  $("table-journal").replaceChildren(runs.length ? tableDetails("Show the periods below the line as a table",
+    table(`Periods when the 12-month net was below your trigger (${signed(t)})`, ["From", "To", "Months", "Lowest"],
+      runs.slice().reverse().map((x) => [mLabel(x.from), x.to === now.i ? `${mLabel(x.to)} (now)` : mLabel(x.to), count(x.to - x.from + 1), sv(x.low.v)]))) : null);
+}
+
+/* ---------- Buying and the price ---------- */
+
+const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+function pearson(xs, ys) {
+  const mx = mean(xs), my = mean(ys);
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let k = 0; k < xs.length; k++) { const dx = xs[k] - mx, dy = ys[k] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+}
+const rho2 = (v) => `${v >= 0 ? "+" : MINUS}${Math.abs(v).toFixed(2)}`;
+
+function renderPrice(m, r) {
+  const sec = $("price");
+  const price = new Map((r?.price || []).map((p) => [p.i, p.v]));
+  if (!price.size) { sec.hidden = true; return; }
+  const start = Math.max(m.turn ?? m.first + 12, Math.min(...price.keys()) + 1);
+  const pts = [];
+  for (let i = start; i <= m.complete; i++) {
+    if (!price.has(i) || !price.has(i - 1)) continue;
+    pts.push({ i, x: price.get(i) / price.get(i - 1) - 1, y: m.months.get(i).net, p: price.get(i) });
+  }
+  if (pts.length < 24) { sec.hidden = true; return; }
+  const rho = pearson(pts.map((p) => p.x), pts.map((p) => p.y));
+  const buckets = [
+    { name: "Price fell more than 3%", test: (x) => x <= -0.03 },
+    { name: "Fell up to 3%", test: (x) => x > -0.03 && x < 0 },
+    { name: "Rose up to 3%", test: (x) => x >= 0 && x < 0.03 },
+    { name: "Rose more than 3%", test: (x) => x >= 0.03 },
+  ].map((b) => { const inb = pts.filter((p) => b.test(p.x)); return { ...b, n: inb.length, v: mean(inb.map((p) => p.y)) }; });
+  const fell = buckets[0], rose = buckets[3];
+  const verdict = fell.n >= 5 && rose.n >= 5
+    ? (fell.v - rose.v >= 5 ? `On average they added more in months when the price fell sharply (${signed(fell.v)}) than when it rose sharply (${signed(rose.v)}): some buying of dips.`
+      : rose.v - fell.v >= 5 ? `On average they added more in months when the price rose sharply (${signed(rose.v)}) than when it fell sharply (${signed(fell.v)}): they have tended to follow the price, not fade it.`
+        : `Average buying was about the same whether the price fell sharply (${signed(fell.v)}) or rose sharply (${signed(rose.v)}).`)
+    : "Too few sharp moves to compare.";
+  $("price-sub").textContent = `Each dot is a month since ${mLabel(start)}: how much the implied gold price moved that month (across) against how much gold central banks reported adding (up). `
+    + `Correlation ${rho2(rho)} over ${pts.length} months${Math.abs(rho) < 0.15 ? ", essentially none" : Math.abs(rho) < 0.3 ? ", weak" : ""}. ${verdict}`;
+  put("price-stats",
+    dstat("Correlation", rho2(rho), `monthly, ${mLabel(start)} to ${mLabel(m.complete)}`),
+    dstat("Price fell > 3%", signed(fell.v), `average month · ${plural(fell.n, "month")}`),
+    dstat("Price rose > 3%", signed(rose.v), `average month · ${plural(rose.n, "month")}`),
+    dstat("All months", signed(mean(pts.map((p) => p.y))), "average reported net change"));
+  scatterChart($("chart-price-scatter"), {
+    points: pts,
+    label: `Scatter chart of monthly reported central bank gold buying against the month's gold price change, ${mLabel(start)} to ${mLabel(m.complete)}.`,
+    xLabel: "gold price change in the month", yLabel: "net reported change, t",
+    cls: (p) => (p.y >= 0 ? "buy" : "sell"),
+    tipTitle: (p) => mLabel(p.i),
+    tipRows: (p) => [{ value: signed(p.y), label: "reported net change", key: p.y >= 0 ? "buy" : "sell" }, { value: pct1(p.x), label: `price move, to ${usd(p.p)}/oz` }],
+  });
+  hbarChart($("chart-price-buckets"), {
+    rows: buckets,
+    label: "Bar chart of average monthly reported central bank buying, grouped by how the gold price moved that month.",
+    tipRows: (b) => [{ value: signed(b.v), label: "average month", key: b.v >= 0 ? "buy" : "sell" }, { value: count(b.n), label: "months" }],
+  });
+  // Seasonality: the average reported change in each calendar month, over whole years only.
+  const y0 = yearOf(start) + (start % 12 ? 1 : 0), y1 = yearOf(m.complete) - (m.complete % 12 === 11 ? 0 : 1);
+  const season = Array.from({ length: 12 }, (_, k) => {
+    const vals = [];
+    for (let y = y0; y <= y1; y++) vals.push({ y, v: m.months.get(y * 12 + k).net });
+    const best = vals.reduce((a, b) => (b.v > a.v ? b : a), vals[0]), worst = vals.reduce((a, b) => (b.v < a.v ? b : a), vals[0]);
+    return { i: k, label: MONTH_ONLY.format(asDate(k)), v: mean(vals.map((x) => x.v)), n: vals.length, best, worst };
+  });
+  const top = season.reduce((a, b) => (b.v > a.v ? b : a), season[0]), low = season.reduce((a, b) => (b.v < a.v ? b : a), season[0]);
+  $("season-sub").textContent = `Average reported net change by calendar month, ${y0} to ${y1}. Strongest ${top.label} (${signed(top.v)}), weakest ${low.label} (${signed(low.v)}). `
+    + "A quiet month that is usually quiet is not a signal.";
+  columnChart($("chart-season"), {
+    bars: season, axis: "labels", height: 220,
+    label: `Column chart of the average monthly reported central bank gold change by calendar month, ${y0} to ${y1}.`,
+    tipTitle: (b) => `${b.label}, average of ${plural(b.n, "year")}`,
+    tipRows: (b) => [{ value: signed(b.v), label: "average month", key: b.v >= 0 ? "buy" : "sell" },
+      { value: signed(b.best.v), label: `most: ${b.best.y}` }, { value: signed(b.worst.v), label: `least: ${b.worst.y}` }],
+  });
+  $("table-price").replaceChildren(tableDetails("Show as a table",
+    table(`Monthly reported change and price move, ${mLabel(start)} to ${mLabel(m.complete)}`, ["Month", "Reported net change", "Price change", "Implied price"],
+      pts.slice().reverse().map((p) => [mLabel(p.i), sv(p.y), pct1(p.x), `${usd(p.p)}/oz`]), { scroll: true })));
+}
+
+/* ---------- Data quality: revisions and the reporting calendar (data/changes.json) ---------- */
+
+const monthEnd = (key) => { const i = idx(key) + 1; return Date.UTC(yearOf(i), i % 12, 1) - DAY_MS; };
+const median = (a) => { if (!a.length) return undefined; const q = a.slice().sort((x, y) => x - y), k = q.length >> 1; return q.length % 2 ? q[k] : (q[k - 1] + q[k]) / 2; };
+const emptyChart = (el, text) => { el.chartObserver?.disconnect(); el.replaceChildren(text ? h("p", { class: "chart-note" }, text) : null); };
+
+function renderQuality(m, changes) {
+  const entries = (changes || []).filter((e) => e.date).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const byCode = new Map(m.holders.map((d) => [d.code, d]));
+  // Every figure that arrived since the log began, against what the IMF shows for it now; every
+  // revision the job recorded; and how long after month end each holder's figures tend to arrive.
+  const firstPrint = new Map(), events = [], lags = new Map();
+  for (const e of entries) {
+    for (const x of e.items || []) {
+      if (x.kind === "new") {
+        const key = `${x.code}|${x.month}`;
+        if (!firstPrint.has(key)) firstPrint.set(key, { code: x.code, month: x.month, t: x.t, date: e.date });
+        const lag = Math.round((dayOf(e.date) - monthEnd(x.month)) / DAY_MS);
+        if (lag >= 0 && lag < 400) lags.set(x.code, [...(lags.get(x.code) || []), lag]);
+      } else if (x.kind === "revised") events.push({ code: x.code, month: x.month, was: x.was, t: x.t, date: e.date });
+    }
+  }
+  const drift = [...firstPrint.values()].map((f) => {
+    const now = byCode.get(f.code)?.s.get(idx(f.month));
+    return { ...f, now, d: now === undefined ? undefined : now - f.t };
+  });
+  const revised = drift.filter((x) => x.d === undefined || Math.abs(x.d) >= 0.05);
+  const sized = revised.filter((x) => x.d !== undefined).sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+  const sizes = sized.map((x) => Math.abs(x.d));
+  const since = entries[0]?.date;
+  $("revisions-sub").textContent = entries.length
+    ? `Every figure that arrived since ${DAY.format(dayOf(since))} is compared with what the IMF shows for it now: ${plural(drift.length, "figure")} tracked, ${revised.length} later revised or withdrawn. `
+      + (sizes.length ? `Typical revision ${tonnes(median(sizes))}; largest ${sv(sized[0].d).textContent} (${nameOf(sized[0].code)}, ${mLabel(idx(sized[0].month))}). ` : "")
+      + "Revisions say how far to trust the newest month before it has settled."
+    : "The daily job hasn't recorded an update yet, so there is nothing to compare. This fills in as figures arrive and get revised.";
+  put("revisions-stats",
+    dstat("Figures tracked", count(drift.length), since ? `since ${DAY.format(dayOf(since))}` : "none yet"),
+    dstat("Revised since first print", drift.length ? `${count(revised.length)} (${pct(revised.length / drift.length)})` : "–", "by 0.05 t or more, or withdrawn"),
+    dstat("Typical revision", sizes.length ? tonnes(median(sizes)) : "–", "median size"),
+    dstat("Revision events", count(events.length), "recorded by the daily job"));
+  const top = sized.slice(0, 10).map((x) => ({ name: `${nameOf(x.code)} · ${mLabel(idx(x.month))}`, v: x.d, x }));
+  if (top.length) {
+    hbarChart($("chart-revisions"), { rows: top, label: "Bar chart of the largest revisions since first print, tonnes.",
+      tipRows: (q) => [{ value: sv(q.v).textContent, label: "since first print", key: q.v >= 0 ? "buy" : "sell" },
+        { value: tonnes(q.x.t), label: `first print, ${DAY.format(dayOf(q.x.date))}` }, { value: tonnes(q.x.now), label: "now" }] });
+  } else emptyChart($("chart-revisions"), "No revisions recorded yet.");
+  $("table-revisions").replaceChildren(events.length ? tableDetails("Show revision events as a table",
+    table("Revisions recorded by the daily job", ["Recorded", "Holder", "Month", "Was", "Now", "Change"],
+      events.slice().reverse().map((x) => [DAY.format(dayOf(x.date)), nameOf(x.code), mLabel(idx(x.month)), tonnes(x.was), tonnes(x.t), sv(x.t - x.was)]), { scroll: true })) : null);
+
+  // The calendar: who still has to file for the next month to count, and how late each usually is.
+  const active = m.holders.filter((d) => !d.stale);
+  const totalA = active.reduce((a, d) => a + d.activity, 0);
+  const next = m.complete < m.newest ? m.complete + 1 : null;
+  const missing = next === null ? [] : active.filter((d) => !d.s.has(next)).sort((a, b) => b.activity - a.activity);
+  const need = [];
+  let cov = next === null ? 1 : m.months.get(next).coverage;
+  for (const d of missing) { if (cov >= COVERAGE_MIN) break; cov += d.activity / totalA; need.push(d); }
+  const typical = (code) => median(lags.get(code) || []);
+  const allLags = [...lags.values()].flat();
+  const behind = active.filter((d) => m.newest - d.last >= 2).length;
+  $("calendar-sub").textContent = next === null
+    ? `Every month up to ${mLabel(m.newest)} is complete.`
+    : `${mLabel(next)} is ${pct(m.months.get(next).coverage)} reported by activity weight and needs ${pct(COVERAGE_MIN)} to enter the totals. `
+      + (need.length ? `${need.map((d) => d.name).join(", ")} ${need.length === 1 ? "alone would" : "together would"} take it over the line; ` : "")
+      + `${plural(missing.length, "active holder")} still to file. Weights are each holder's buying and selling over its own last 12 months, so the US (which never changes) weighs nothing and Turkey weighs a lot.`;
+  put("calendar-stats",
+    dstat("Next month to complete", next === null ? "–" : mLabel(next), next === null ? "all months complete" : `${pct(m.months.get(next).coverage)} reported`),
+    dstat("Filers needed", next === null ? "–" : count(need.length), need.length ? need.slice(0, 3).map((d) => d.name).join(", ") : "the line is reached"),
+    dstat("Holders 2+ months behind", count(behind), `of ${active.length} active`),
+    dstat("Typical delay", allLags.length ? `${Math.round(median(allLags))} days` : "learning", allLags.length ? `after month end · ${plural(allLags.length, "filing")} seen` : "measured as filings arrive"));
+  if (missing.length) {
+    hbarChart($("chart-calendar"), { rows: missing.slice(0, 12).map((d) => ({ name: d.name, v: d.activity / totalA, d })), neutral: true, fmt: pct1,
+      label: `Bar chart of the activity weight of holders that have not yet reported ${mLabel(next)}.`,
+      tipRows: (q) => [{ value: pct1(q.v), label: "share of activity weight" }, { value: mLabel(q.d.last), label: "latest report" },
+        ...(typical(q.d.code) !== undefined ? [{ value: `${Math.round(typical(q.d.code))} days`, label: "usual delay after month end" }] : [])] });
+  } else emptyChart($("chart-calendar"));
+  $("table-calendar").replaceChildren(tableDetails("Show every active holder as a table",
+    table(`Active holders (reported within ${STALE_MONTHS} months of ${mLabel(m.newest)}), by activity weight`,
+      ["Holder", "Latest month", "Months behind", "Weight", ...(next === null ? [] : [`Filed ${MONTH_ONLY.format(asDate(next))}?`]), "Usual delay"],
+      active.slice().sort((a, b) => b.activity - a.activity).map((d) => [d.name, mLabel(d.last), count(m.newest - d.last), pct1(d.activity / totalA),
+        ...(next === null ? [] : [d.s.has(next) ? "yes" : "–"]), typical(d.code) !== undefined ? `${Math.round(typical(d.code))} days` : "–"]), { scroll: true })));
+}
+
+/* ---------- Gold against the dollar: US Treasuries (TIC) and reserve currencies (COFER) ---------- */
+
+const bn = (v) => usdMn(v * 1000); // TIC values are US$ billions
+const bnTick = (v) => (v === 0 ? "0" : `$${(v / 1000).toLocaleString("en", { maximumFractionDigits: 1 })} tn`);
+const signedBn = (v) => `${isZero(v) ? "" : v > 0 ? "+" : MINUS}$${NF0.format(Math.abs(v))} bn`;
+const qIdx = (q) => Number(q.slice(0, 4)) * 12 + Number(q.slice(-1)) * 3 - 1; // "2026-Q2" -> its last month
+const qName = (q) => q.replace("-", " ");
+
+function renderDollar(m, r, tic, cofer) {
+  const sec = $("dollar");
+  const tm = (tic?.months || []).filter((x) => Number.isFinite(x[1])).map(([k, off, tot]) => ({ i: idx(k), v: off, tot }));
+  const cq = (cofer?.quarters || []).filter((x) => Number.isFinite(x[1]?.USD)).map(([q, d]) => ({ q, i: qIdx(q), ...d }));
+  if (tm.length < 24 && cq.length < 8) { sec.hidden = true; return; }
+  const stats = [];
+  const goldOver = (from, to) => (to <= m.complete && from >= m.first ? signed(m.sumNet(from, to)) : null);
+  if (tm.length >= 24) {
+    const last = tm.at(-1), ago = tm.find((p) => p.i === last.i - 12), peak = tm.reduce((a, p) => (p.v >= a.v ? p : a), tm[0]);
+    const freeze = tm.find((p) => p.i === idx("2022-02"));
+    const d12 = ago ? last.v - ago.v : null;
+    const g12 = goldOver(last.i - 11, last.i), gFreeze = freeze ? goldOver(freeze.i + 1, last.i) : null;
+    stats.push(dstat("US Treasuries, foreign official", bn(last.v), `${mLabel(last.i)} · ${pct(last.v / last.tot)} of all foreign-held`),
+      d12 !== null ? dstat("12 months", h("span", { class: tone(d12, 0.5) }, `${arrow(d12, 0.5)} ${signedBn(d12)}`), g12 ? `gold reported ${g12} over the same months` : null) : null,
+      dstat("Peak", bn(peak.v), `${mLabel(peak.i)} · ${signedBn(last.v - peak.v)} since`),
+      freeze ? dstat("Since Feb 2022", h("span", { class: tone(last.v - freeze.v, 0.5) }, `${arrow(last.v - freeze.v, 0.5)} ${signedBn(last.v - freeze.v)}`), `Russia's reserves frozen${gFreeze ? `; gold reported ${gFreeze}` : ""}`) : null);
+    $("treasuries-sub").textContent = `What foreign central banks, finance ministries and sovereign funds hold in US Treasury securities, ${mLabel(tm[0].i)} to ${mLabel(last.i)} (US Treasury TIC data, attributed by custodian country). `
+      + `Peak ${bn(peak.v)} in ${mLabel(peak.i)}; ${bn(last.v)} now. Flat holdings while US debt grew mean a shrinking share of it; over the same years reported gold rose.`;
+    lineChart($("chart-treasuries"), {
+      points: tm, height: 240, fmtTick: bnTick, endLabel: (p) => bn(p.v),
+      label: `Line chart of foreign official holdings of US Treasury securities, ${mLabel(tm[0].i)} to ${mLabel(last.i)}. Latest ${bn(last.v)}.`,
+      tipRows: (p) => [{ value: bn(p.v), label: "foreign official", key: "line" }, { value: bn(p.tot), label: "all foreign holders" }, { value: pct(p.v / p.tot), label: "official share" }],
+    });
+    const byI = new Map(tm.map((p) => [p.i, p.v]));
+    const chg = tm.filter((p) => byI.has(p.i - 12)).map((p) => ({ i: p.i, v: p.v - byI.get(p.i - 12) }));
+    columnChart($("chart-treasuries-change"), {
+      bars: chg, height: 200, fmtTick: tickText,
+      label: `Column chart of the 12-month change in foreign official holdings of US Treasuries, US$ billions, ${mLabel(chg[0].i)} to ${mLabel(chg.at(-1).i)}.`,
+      tipRows: (b) => [{ value: signedBn(b.v), label: "12-month change", key: b.v >= 0 ? "buy" : "sell" },
+        ...(goldOver(b.i - 11, b.i) ? [{ value: goldOver(b.i - 11, b.i), label: "gold reported, same 12 months" }] : [])],
+    });
+  } else $("treasuries-block").hidden = true;
+  if (cq.length >= 8) {
+    const last = cq.at(-1), ago = cq.find((p) => p.i === last.i - 12), first = cq[0];
+    stats.push(dstat("US dollar share of FX reserves", pct1(last.USD / 100), `${qName(last.q)} · IMF COFER`),
+      ago ? dstat("Dollar share, 4 quarters", h("span", { class: tone(last.USD - ago.USD, 0.05) }, `${arrow(last.USD - ago.USD, 0.05)} ${pts((last.USD - ago.USD) / 100)}`), `${pct1(ago.USD / 100)} in ${qName(ago.q)}`) : null,
+      dstat(`Since ${qName(first.q)}`, pts((last.USD - first.USD) / 100), `from ${pct1(first.USD / 100)} · euro ${pct1(last.EUR / 100)}, renminbi ${pct1((last.CNY || 0) / 100)}`));
+    if (r?.worldSeries?.length) {
+      const g = r.worldSeries.at(-1);
+      stats.push(dstat("Gold share of total reserves", pct1(g.v), `${mLabel(g.i)} · this page; COFER counts currencies only`));
+    }
+    $("cofer-sub").textContent = `Which currencies the world's foreign exchange reserves are held in, ${qName(first.q)} to ${qName(last.q)} (IMF COFER, shares of the reserves whose currency is reported; gold is not part of it). `
+      + `The dollar: ${pct1(first.USD / 100)} then, ${pct1(last.USD / 100)} now. What left the dollar went mostly to smaller currencies and, outside this chart, to gold.`;
+    const series = [
+      { name: "US dollar", cls: "", key: "USD" },
+      { name: "Euro", cls: "s2", key: "EUR" },
+      { name: "All other currencies", cls: "s3", key: null },
+    ].map((sr) => ({ ...sr, points: cq.map((p) => ({ i: p.i, v: (sr.key ? p[sr.key] : 100 - p.USD - p.EUR) / 100, q: p.q })) }));
+    $("cofer-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+    multiLineChart($("chart-cofer"), {
+      series, height: 260, fmt: pct1, fmtTick: pctTick,
+      tipTitle: (p) => qName(p.q),
+      label: `Line chart of the US dollar, euro and other currencies' shares of world foreign exchange reserves, ${qName(first.q)} to ${qName(last.q)}.`,
+      tipExtra: (k) => [{ value: pct1((cq[k].CNY || 0) / 100), label: "of which renminbi" },
+        ...(Number.isFinite(cq[k].allocated) ? [{ value: bn(cq[k].allocated), label: "allocated reserves" }] : [])],
+    });
+  } else $("cofer-block").hidden = true;
+  put("dollar-stats", stats);
+  const years = [...new Set([...tm.map((p) => yearOf(p.i)), ...cq.map((p) => yearOf(p.i))])].sort((a, b) => b - a);
+  const byI = new Map(tm.map((p) => [p.i, p.v]));
+  const rows = years.map((y) => {
+    const t = tm.findLast((p) => yearOf(p.i) === y), c = cq.findLast((p) => yearOf(p.i) === y);
+    return [String(y), t ? `${MONTH_ONLY.format(asDate(t.i))}: ${bn(t.v)}` : "–", t && byI.has(t.i - 12) ? signedBn(t.v - byI.get(t.i - 12)) : "–",
+      c ? pct1(c.USD / 100) : "–", c ? pct1(c.EUR / 100) : "–", c && c.CNY != null ? pct1(c.CNY / 100) : "–", (t && goldOver(t.i - 11, t.i)) || "–"];
+  });
+  $("table-dollar").replaceChildren(tableDetails("Show year ends as a table",
+    table("Foreign official US Treasury holdings, reserve currency shares and reported gold buying, at each year's latest figure",
+      ["Year", "Treasuries, foreign official", "12-month change", "US dollar share", "Euro share", "Renminbi share", "Gold reported, 12 months"], rows, { scroll: true })));
+}
+
+/* ---------- Reported vs all central bank buying (WGC estimate, data/wgc_central_banks.json) ---------- */
+
+function renderUnreported(m, wgc) {
+  const sec = $("unreported");
+  const qs = Object.entries(wgc?.quarterly || {}).filter(([q, v]) => /^\d{4}-Q[1-4]$/.test(q) && Number.isFinite(v?.[0]))
+    .map(([q, [v, from]]) => ({ q, i: qIdx(q), v, from })).sort((a, b) => a.i - b.i);
+  const ys = Object.entries(wgc?.annual || {}).filter(([y, v]) => /^\d{4}$/.test(y) && Number.isFinite(v?.[0]))
+    .map(([y, [v, from]]) => ({ y: Number(y), v, from })).sort((a, b) => a.y - b.y);
+  if (!qs.length && !ys.length) { sec.hidden = true; return; }
+  for (const x of qs) x.rep = x.i <= m.complete && x.i - 2 > m.first ? m.sumNet(x.i - 2, x.i) : null;
+  for (const x of ys) { const yr = m.years.find((z) => z.i === x.y && !z.partial); x.rep = yr ? yr.v : null; }
+  const both = qs.filter((x) => x.rep !== null), latest = both.at(-1), last4 = both.slice(-4);
+  const sumW = (a) => a.reduce((t, x) => t + x.v, 0), sumR = (a) => a.reduce((t, x) => t + x.rep, 0);
+  const hidden = (w, rp) => (w > 0 ? pct(Math.max(0, 1 - rp / w)) : "–");
+  const latestY = ys.filter((x) => x.rep !== null).at(-1);
+  $("unreported-sub").textContent = latest
+    ? `The World Gold Council estimates all central bank buying, including purchases no country reports; this page counts only what reaches the IMF. ${qName(latest.q)}: WGC ${signed(latest.v)}, reported ${signed(latest.rep)}, so about ${hidden(latest.v, latest.rep)} of the quarter's buying was not disclosed by country. `
+      + `Over the last ${plural(last4.length, "quarter")}: ${signed(sumW(last4))} estimated against ${signed(sumR(last4))} reported (${hidden(sumW(last4), sumR(last4))} undisclosed).`
+    : "The World Gold Council's estimate of all central bank buying against what is reported to the IMF.";
+  put("unreported-stats",
+    latest ? dstat(`WGC estimate, ${qName(latest.q)}`, signed(latest.v), `from the ${latest.from} report`) : null,
+    latest ? dstat(`Reported to the IMF, ${qName(latest.q)}`, signed(latest.rep), "this page's count") : null,
+    latest ? dstat("Not disclosed by country", hidden(latest.v, latest.rep), `${qName(latest.q)} · ${hidden(sumW(last4), sumR(last4))} over the last ${last4.length} quarters`) : null,
+    latestY ? dstat(`${latestY.y}, whole year`, `${signed(latestY.v)} vs ${signed(latestY.rep)}`, `WGC estimate vs reported · ${hidden(latestY.v, latestY.rep)} undisclosed`) : null);
+  if (qs.length >= 4) {
+    const series = [
+      { name: "WGC estimate, all central banks", cls: "s2", points: qs.map((x) => ({ i: x.i, v: x.v, q: x.q })) },
+      { name: "Reported to the IMF (this page)", cls: "", points: qs.map((x) => ({ i: x.i, v: x.rep, q: x.q })) },
+    ];
+    $("unreported-legend").replaceChildren(...series.map((sr) => h("span", {}, h("i", { class: sr.cls, "aria-hidden": "true" }), sr.name)));
+    multiLineChart($("chart-unreported"), {
+      series, height: 240, tipTitle: (p) => qName(p.q),
+      label: `Line chart of quarterly central bank gold buying, World Gold Council estimate against the IMF-reported total, ${qName(qs[0].q)} to ${qName(qs.at(-1).q)}.`,
+      tipExtra: (k) => (qs[k].rep !== null ? [{ value: hidden(qs[k].v, qs[k].rep), label: "not disclosed by country" }] : [{ value: "–", label: "quarter not yet complete in the IMF data" }]),
+    });
+  } else emptyChart($("chart-unreported"));
+  $("unreported-note").replaceChildren(`Hand-kept: the WGC figures are typed in from its Gold Demand Trends report pages (the data tables behind them need a login), each the latest revision found there${wgc.entered ? `, last entered ${DAY.format(dayOf(wgc.entered))}` : ""}. `,
+    "The WGC revises past quarters as buying comes to light, sometimes by a lot. Edit ", h("a", { href: "https://github.com/Vasuki8/gold-tracker/edit/main/data/wgc_central_banks.json" }, "data/wgc_central_banks.json"), " after each quarterly report.");
+  const row = (x, name) => [name, signed(x.v), x.rep === null ? "–" : signed(x.rep), x.rep === null ? "–" : hidden(x.v, x.rep), x.from];
+  $("table-unreported").replaceChildren(
+    qs.length ? tableDetails("Show quarters as a table", table("Quarterly central bank buying: WGC estimate vs reported to the IMF, tonnes", ["Quarter", "WGC estimate", "Reported", "Not disclosed", "WGC figure from"],
+      qs.slice().reverse().map((x) => row(x, qName(x.q))), { scroll: true })) : null,
+    ys.length ? tableDetails("Show years as a table", table("Yearly central bank buying: WGC estimate vs reported to the IMF, tonnes", ["Year", "WGC estimate", "Reported", "Not disclosed", "WGC figure from"],
+      ys.slice().reverse().map((x) => row(x, String(x.y))))) : null);
+}
+
 async function getJSON(url) {
   const res = await fetch(url, { cache: "no-cache" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1951,10 +2386,11 @@ async function getLog(url) {
 }
 
 async function main() {
-  let raw, rr = null, log = null, changes = null;
+  let raw, rr = null, log = null, changes = null, journal = null, tic = null, cofer = null, wgc = null;
   try {
-    [raw, rr, log, changes] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null),
-      getLog("data/fetch_log.csv").catch(() => null), getJSON(CHANGES_URL).catch(() => null)]);
+    [raw, rr, log, changes, journal, tic, cofer, wgc] = await Promise.all([getJSON(DATA_URL), getJSON(RESERVES_URL).catch(() => null),
+      getLog("data/fetch_log.csv").catch(() => null), getJSON(CHANGES_URL).catch(() => null), getJSON(JOURNAL_URL).catch(() => null),
+      getJSON(TIC_URL).catch(() => null), getJSON(COFER_URL).catch(() => null), getJSON(WGC_URL).catch(() => null)]);
   } catch (err) {
     const f = $("ticker");
     f.textContent = `Couldn't load ${DATA_URL} (${err.message}). If you opened this file directly, serve the folder over HTTP instead.`;
@@ -1963,15 +2399,20 @@ async function main() {
   }
   const m = buildModel(raw);
   const r = buildReserves(rr, m);
+  JOURNAL = journal;
   renderTicker(m, r);
   renderHero(m);
   renderStatGroups(m, r, log);
   renderFreshness(m);
   renderRolling(m, r);
   wireTrendRange(m, r);
+  renderJournal(m, journal);
+  renderUnreported(m, wgc);
   renderYears(m);
   renderMonthly(m);
+  renderPrice(m, r);
   renderUpdates(changes);
+  renderQuality(m, changes);
   renderWho(m);
   renderGroups(m);
 
@@ -1992,6 +2433,7 @@ async function main() {
   renderBreadth(m);
   if (r && r.worldSeries.length) renderShare(m, r);
   else $("reserves").hidden = true;
+  renderDollar(m, r, tic, cofer);
   renderBoard(m, r, select);
   const asked = params.get("holder");
   select(m.holders.some((d) => d.code === asked) ? asked : defaultHolder, false);

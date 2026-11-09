@@ -1,0 +1,70 @@
+# Monthly fetch of the two "dollar" series the page sets against central bank gold:
+# - foreign official holdings of US Treasuries (US Treasury TIC, monthly, published mid-month);
+# - the currency composition of world FX reserves (IMF COFER, quarterly, published end of quarter).
+# Kept apart from the daily IMF gold job: a problem here can't touch that pipeline or its
+# reliability count. Each step appends a row to its own log; each data file is committed only
+# when its own step passed and the figures changed. A failed step fails the job, so GitHub emails
+# the repo owner.
+name: Fetch Treasuries and reserve currencies
+
+on:
+  schedule:
+    - cron: "53 7 20 * *" # 07:53 UTC on the 20th; TIC's monthly release is around the 15th-18th
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-dollar
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch foreign official holdings of US Treasuries (TIC)
+        id: tic
+        continue-on-error: true
+        run: python3 spike/fetch_tic.py --out data --log data/fetch_log_tic.csv
+
+      - name: Fetch the currency composition of reserves (IMF COFER)
+        id: cofer
+        continue-on-error: true
+        run: python3 spike/fetch_cofer.py --out data --log data/fetch_log_cofer.csv
+
+      - name: Commit the log rows, and the data if it changed
+        env:
+          TIC_OUTCOME: ${{ steps.tic.outcome }}
+          COFER_OUTCOME: ${{ steps.cofer.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Never commit data from a failed step; its log row still goes in.
+          keep_or_drop() {
+            if [ "$1" != "success" ]; then git restore "$2" 2>/dev/null || rm -f "$2"; fi
+            if [ -f "$2" ]; then git add "$2"; fi
+          }
+          keep_or_drop "$TIC_OUTCOME" data/treasuries_tic.json
+          keep_or_drop "$COFER_OUTCOME" data/cofer_shares.json
+          for f in data/fetch_log_tic.csv data/fetch_log_cofer.csv; do [ -f "$f" ] && git add "$f"; done
+          changed=""
+          git diff --cached --quiet -- data/treasuries_tic.json || changed="Treasuries"
+          git diff --cached --quiet -- data/cofer_shares.json || changed="${changed:+$changed + }COFER"
+          if [ -n "$changed" ]; then
+            msg="Dollar data update: $changed (newest TIC month $(tail -n 1 data/fetch_log_tic.csv | cut -d, -f8))"
+          else
+            msg="Dollar fetch log: TIC $TIC_OUTCOME, COFER $COFER_OUTCOME"
+          fi
+          git diff --cached --quiet || git commit -m "$msg"
+          git pull --rebase --quiet origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+
+      - name: Fail the run if a step failed
+        if: steps.tic.outcome != 'success' || steps.cofer.outcome != 'success'
+        run: |
+          echo "::error::TIC: ${{ steps.tic.outcome }}. COFER: ${{ steps.cofer.outcome }}. See the step logs."
+          exit 1

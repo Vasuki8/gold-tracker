@@ -1,0 +1,29 @@
+# Does the alert job count a month exactly as the page does? spike/changes.py carries a Python
+# port of the page's gauge; this runs both on the committed data and a few edited copies and
+# fails if they disagree. Runs only when code changes, not on the data commits the fetch jobs make.
+name: Test gauge consistency
+
+on:
+  push:
+    paths:
+      - assets/app.js
+      - spike/**
+      - .github/workflows/test.yml
+  pull_request:
+    paths:
+      - assets/app.js
+      - spike/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gauge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: node --version && python3 --version
+      - name: changes.py and app.js must agree on the gauge
+        run: python3 spike/test_gauge.py

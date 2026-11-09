@@ -1,0 +1,40 @@
+{
+ "source": "World Gold Council, Gold Demand Trends: central banks and other institutions, net purchases, tonnes (includes the WGC's estimate of buying not reported by country)",
+ "pages": "https://www.gold.org/goldhub/research/gold-demand-trends",
+ "entered": "2026-11-08",
+ "note": "Typed in by hand from the report pages on gold.org (the data tables behind them need a login, and the WGC's terms don't allow copying them). Each figure is the latest revision found on those pages, and 'from' names the report it was read from. The WGC revises past quarters as more buying comes to light, sometimes by a lot (Q1 2026: 243.7 t when first published, 57.7 t two reports later). Update after each quarterly report, at the end of January, April, July and October.",
+ "unit": "tonnes",
+ "annual": {
+  "2016": [383.6, "Full year 2016"],
+  "2017": [371.4, "Full year 2017"],
+  "2018": [651.5, "Full year 2018"],
+  "2019": [650.3, "Full year 2019"],
+  "2020": [272.9, "Full year 2020"],
+  "2021": [463.0, "Full year 2021"],
+  "2022": [1081.9, "Full year 2023"],
+  "2023": [1050.8, "Full year 2024"],
+  "2024": [1092.4, "Full year 2025"],
+  "2025": [863.3, "Full year 2025"]
+ },
+ "quarterly": {
+  "2022-Q1": [82.7, "Q1 2023"],
+  "2022-Q2": [158.6, "Q2 2023"],
+  "2022-Q3": [458.8, "Q3 2023"],
+  "2022-Q4": [382.1, "Q3 2023"],
+  "2023-Q1": [286.2, "Q1 2024"],
+  "2023-Q2": [173.6, "Q2 2024"],
+  "2023-Q3": [363.9, "Q3 2024"],
+  "2023-Q4": [216.8, "Full year 2024"],
+  "2024-Q1": [309.9, "Q1 2025"],
+  "2024-Q2": [211.5, "Q2 2025"],
+  "2024-Q3": [199.5, "Q3 2025"],
+  "2024-Q4": [366.6, "Full year 2025"],
+  "2025-Q1": [237.0, "Q1 2026"],
+  "2025-Q2": [177.9, "Q2 2026"],
+  "2025-Q3": [226.3, "Q3 2026"],
+  "2025-Q4": [209.9, "Q3 2026"],
+  "2026-Q1": [57.7, "Q3 2026"],
+  "2026-Q2": [296.3, "Q3 2026"],
+  "2026-Q3": [321.2, "Q3 2026"]
+ }
+}

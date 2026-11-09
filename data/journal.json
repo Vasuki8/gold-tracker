@@ -1,0 +1,11 @@
+{
+ "note": "Your own file: edit it by hand (on GitHub: Edit this file, commit to main). trigger.t is the 12-month net reported buying, in tonnes, below which you re-examine your position; the page draws it on the trend chart and says how far the gauge is from it. entries are your notes, one per decision or observation; each is marked on the trend chart in its month and listed in the Journal section with the gauge as it read then.",
+ "trigger": {
+  "t": 160,
+  "set": "2026-11-08",
+  "why": "Half the pace at launch (+320 t over the 12 months to Aug 2026). If reported central bank buying halves, re-read the case for gold and gold-miner exposure. A starting point: change it to the number that would really make you act."
+ },
+ "entries": [
+  {"date": "2026-11-08", "text": "Tracker launched. 12-month net +320 t and speeding up; Poland and China 56% of gross reported buying; gold 25% of reported reserves. No position change."}
+ ]
+}

@@ -27,15 +27,20 @@
       <nav class="tabs" aria-label="Sections">
         <a href="#gauge">Overview</a>
         <a href="#trend">Trend</a>
+        <a href="#journal">Journal</a>
+        <a href="#unreported">Unreported</a>
         <a href="#years">Years</a>
         <a href="#supply">Supply</a>
         <a href="#months">Months</a>
+        <a href="#price">Price</a>
         <a href="#updates">Updates</a>
+        <a href="#quality">Quality</a>
         <a href="#who">Who</a>
         <a href="#groups">Groups</a>
         <a href="#momentum">Momentum</a>
         <a href="#breadth">Breadth</a>
         <a href="#reserves">Reserves</a>
+        <a href="#dollar">Dollar</a>
         <a href="#board">Holders</a>
         <a href="#country">Holder</a>
         <a href="#compare">Compare</a>
@@ -77,6 +82,26 @@
         <div id="table-rolling"></div>
       </section>
 
+      <section class="card" id="journal" aria-labelledby="journal-h">
+        <h2 id="journal-h">Your trigger and journal</h2>
+        <p class="sub" id="journal-sub"></p>
+        <dl class="stats" id="journal-stats"></dl>
+        <h3 class="h3">Entries</h3>
+        <div id="journal-list"></div>
+        <p class="chart-note" id="journal-note"></p>
+        <div id="table-journal"></div>
+      </section>
+
+      <section class="card" id="unreported" aria-labelledby="unreported-h">
+        <h2 id="unreported-h">Reported buying against the World Gold Council's estimate</h2>
+        <p class="sub" id="unreported-sub"></p>
+        <dl class="stats" id="unreported-stats"></dl>
+        <div class="legend" id="unreported-legend"></div>
+        <div class="chart" id="chart-unreported"></div>
+        <p class="chart-note" id="unreported-note"></p>
+        <div id="table-unreported"></div>
+      </section>
+
       <section class="card" id="years" aria-labelledby="years-h">
         <h2 id="years-h">Year by year</h2>
         <p class="sub" id="years-sub"></p>
@@ -110,10 +135,37 @@
         <div id="table-monthly"></div>
       </section>
 
+      <section class="card" id="price" aria-labelledby="price-h">
+        <h2 id="price-h">Buying and the price</h2>
+        <p class="sub" id="price-sub"></p>
+        <dl class="stats" id="price-stats"></dl>
+        <div class="chart" id="chart-price-scatter"></div>
+        <h3 class="h3">Average month, by how the price moved</h3>
+        <div class="chart" id="chart-price-buckets"></div>
+        <h3 class="h3">By calendar month</h3>
+        <p class="sub small" id="season-sub"></p>
+        <div class="chart" id="chart-season"></div>
+        <div id="table-price"></div>
+      </section>
+
       <section class="card" id="updates" aria-labelledby="updates-h">
         <h2 id="updates-h">Updates from the IMF</h2>
         <p class="sub" id="updates-sub"></p>
         <div id="updates-list"></div>
+      </section>
+
+      <section class="card" id="quality" aria-labelledby="quality-h">
+        <h2 id="quality-h">Data quality: revisions and who is late</h2>
+        <h3 class="h3 first">How much the figures get revised</h3>
+        <p class="sub" id="revisions-sub"></p>
+        <dl class="stats" id="revisions-stats"></dl>
+        <div class="chart" id="chart-revisions"></div>
+        <div id="table-revisions"></div>
+        <h3 class="h3">Who still has to file</h3>
+        <p class="sub" id="calendar-sub"></p>
+        <dl class="stats" id="calendar-stats"></dl>
+        <div class="chart" id="chart-calendar"></div>
+        <div id="table-calendar"></div>
       </section>
 
       <section class="card" id="who" aria-labelledby="who-h">
@@ -173,6 +225,26 @@
             <div class="chart" id="chart-price"></div>
           </div>
         </div>
+      </section>
+
+      <section class="card" id="dollar" aria-labelledby="dollar-h">
+        <h2 id="dollar-h">Gold against the dollar</h2>
+        <p class="sub">Central banks keep most of their reserves in US Treasuries and gold. Treasuries come from the US Treasury's TIC data (monthly), reserve currencies from the IMF's COFER (quarterly); a monthly job fetches both, separate from the daily gold job.</p>
+        <dl class="stats" id="dollar-stats"></dl>
+        <div id="treasuries-block">
+          <h3 class="h3">US Treasuries held by foreign official institutions</h3>
+          <p class="sub small" id="treasuries-sub"></p>
+          <div class="chart" id="chart-treasuries"></div>
+          <h3 class="h3">12-month change in those holdings, US$ billions</h3>
+          <div class="chart" id="chart-treasuries-change"></div>
+        </div>
+        <div id="cofer-block">
+          <h3 class="h3">Currency shares of world foreign exchange reserves</h3>
+          <p class="sub small" id="cofer-sub"></p>
+          <div class="legend" id="cofer-legend"></div>
+          <div class="chart" id="chart-cofer"></div>
+        </div>
+        <div id="table-dollar"></div>
       </section>
 
       <section class="card" id="board" aria-labelledby="board-h">
@@ -255,7 +327,7 @@
     </main>
 
     <footer class="page-foot" id="foot">
-      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>, <a href="data/changes.json">changes</a>). Mine production: <a href="https://www.usgs.gov/centers/national-minerals-information-center/mineral-commodity-summaries">USGS Mineral Commodity Summaries</a> (<a href="spike/fetch_production.py">script</a>, <a href="data/production_usgs.json">data</a>, <a href="data/fetch_log_production.csv">log</a>) and <a href="https://ourworldindata.org/explorers/minerals">Our World in Data</a> (USGS and BGS figures, loaded by your browser). Funds panel: <a href="https://www.spdrgoldshares.com/usa/historical-data/">SPDR Gold Shares</a> and <a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm">CFTC Commitments of Traders</a>, loaded by your browser. A personal project, not investment advice.</p>
+      <p>Source: IMF International Reserves and Foreign Currency Liquidity (IRFCL): line 56 gold volume and value, and total official reserve assets, for monetary authorities plus central government. Fetched daily by a GitHub Actions job (scripts: <a href="spike/fetch_irfcl.py">gold</a>, <a href="spike/fetch_reserves.py">reserves</a>; run logs: <a href="data/fetch_log.csv">gold</a>, <a href="data/fetch_log_reserves.csv">reserves</a>; data: <a href="data/gold_tonnes.json">gold</a>, <a href="data/reserves_usd.json">reserves</a>, <a href="data/changes.json">changes</a>). Mine production: <a href="https://www.usgs.gov/centers/national-minerals-information-center/mineral-commodity-summaries">USGS Mineral Commodity Summaries</a> (<a href="spike/fetch_production.py">script</a>, <a href="data/production_usgs.json">data</a>, <a href="data/fetch_log_production.csv">log</a>) and <a href="https://ourworldindata.org/explorers/minerals">Our World in Data</a> (USGS and BGS figures, loaded by your browser). Funds panel: <a href="https://www.spdrgoldshares.com/usa/historical-data/">SPDR Gold Shares</a> (loaded by your browser) and <a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm">CFTC Commitments of Traders</a> (<a href="spike/fetch_cftc.py">weekly script</a>, <a href="data/cftc_gold.json">data</a>, <a href="data/fetch_log_cftc.csv">log</a>). Dollar section: <a href="https://home.treasury.gov/data/treasury-international-capital-tic-system">US Treasury TIC</a> (<a href="spike/fetch_tic.py">script</a>, <a href="data/treasuries_tic.json">data</a>, <a href="data/fetch_log_tic.csv">log</a>) and <a href="https://data.imf.org/en/datasets/IMF.STA:COFER">IMF COFER</a> (<a href="spike/fetch_cofer.py">script</a>, <a href="data/cofer_shares.json">data</a>, <a href="data/fetch_log_cofer.csv">log</a>). World Gold Council figures typed in by hand from <a href="https://www.gold.org/goldhub/research/gold-demand-trends">Gold Demand Trends</a> (<a href="data/wgc_central_banks.json">data</a>). Your trigger and notes: <a href="data/journal.json">data/journal.json</a>. The alert job's gauge is <a href="spike/test_gauge.py">tested</a> against the page's on every code change. A personal project, not investment advice.</p>
     </footer>
   </div>
 </body>

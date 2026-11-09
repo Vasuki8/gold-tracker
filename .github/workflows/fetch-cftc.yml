@@ -1,0 +1,61 @@
+# Weekly fetch of COMEX gold futures positions (CFTC Commitments of Traders). The CFTC publishes
+# Tuesday's positions on Friday afternoon (US time), so Saturday morning UTC has the new week.
+# Kept apart from the daily IMF gold job: a CFTC problem can't touch that pipeline or its
+# reliability count. The data file is committed only when the fetch passed and the figures
+# changed; when the funds' net position moved a lot, the script opens a GitHub issue assigned to
+# the repo owner. A failed fetch fails the job, so GitHub emails the owner.
+name: Fetch CFTC gold futures positions
+
+on:
+  schedule:
+    - cron: "17 7 * * 6" # 07:17 UTC on Saturdays
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write # alerts
+
+concurrency:
+  group: fetch-cftc
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch positions, and open an alert issue if the funds' bet moved a lot
+        id: fetch
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git show HEAD:data/cftc_gold.json > "$RUNNER_TEMP/cftc_prev.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/cftc_prev.json"
+          python3 spike/fetch_cftc.py --out data --log data/fetch_log_cftc.csv --old "$RUNNER_TEMP/cftc_prev.json" --issue
+
+      - name: Commit the log row, and the data if it changed
+        env:
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Never commit data from a failed fetch; its log row still goes in.
+          if [ "$FETCH_OUTCOME" != "success" ]; then git restore data/cftc_gold.json 2>/dev/null || rm -f data/cftc_gold.json; fi
+          if [ -f data/cftc_gold.json ]; then git add data/cftc_gold.json; fi
+          git add data/fetch_log_cftc.csv
+          if git diff --cached --quiet -- data/cftc_gold.json; then
+            msg="CFTC fetch log: $FETCH_OUTCOME"
+          else
+            msg="CFTC data update: gold futures positions (week to $(tail -n 1 data/fetch_log_cftc.csv | cut -d, -f8))"
+          fi
+          git diff --cached --quiet || git commit -m "$msg"
+          git pull --rebase --quiet origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+
+      - name: Fail the run if the fetch failed
+        if: steps.fetch.outcome != 'success'
+        run: |
+          echo "::error::CFTC fetch: ${{ steps.fetch.outcome }}. See the step log."
+          exit 1
