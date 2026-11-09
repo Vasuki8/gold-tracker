@@ -1537,7 +1537,7 @@ function renderNotes(m, r) {
     h("h3", {}, "Reported against the World Gold Council's estimate"),
     h("p", {}, "The WGC's Gold Demand Trends estimates total central bank buying each quarter, including purchases not reported by any country, from its own research and trade data. Its figures are typed into data/wgc_central_banks.json by hand from the report pages, each the latest revision found there. “Reported” is this page's sum of monthly net changes over the quarter; the undisclosed share is one minus reported over estimated."),
     h("h3", {}, "Reading the gauge"),
-    h("p", {}, "“Speeding up” compares the last three months, scaled to a year, with the 12-month total; within 15% counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars."),
+    h("p", {}, "“Speeding up” compares the last three months, scaled to a year, with the 12-month total; within 15% of it (or within 20 t, when the total is small) counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars."),
   );
 }
 
@@ -2289,7 +2289,8 @@ function renderQuality(m, changes) {
     dstat("Next month to complete", next === null ? "–" : mLabel(next), next === null ? "all months complete" : `${pct(m.months.get(next).coverage)} reported`),
     dstat("Filers needed", next === null ? "–" : count(need.length), need.length ? need.slice(0, 3).map((d) => d.name).join(", ") : "the line is reached"),
     dstat("Holders 2+ months behind", count(behind), `of ${active.length} active`),
-    dstat("Typical delay", allLags.length ? `${Math.round(median(allLags))} days` : "learning", allLags.length ? `after month end · ${plural(allLags.length, "filing")} seen` : "measured as filings arrive"));
+    dstat("Typical delay", allLags.length ? `${Math.round(median(allLags))} days` : "learning",
+      allLags.length ? `after month end · ${plural(allLags.length, "filing")} seen${allLags.length < 10 ? ", too few to trust yet" : ""}` : "measured as filings arrive"));
   if (missing.length) {
     // Holders with no activity weight can't move the month over the line, so they stay in the table only.
     hbarChart($("chart-calendar"), { rows: missing.filter((d) => d.activity / totalA >= 0.0005).slice(0, 12).map((d) => ({ name: d.name, v: d.activity / totalA, d })), neutral: true, fmt: pct1,
@@ -2354,7 +2355,8 @@ function renderDollar(m, r, tic, cofer) {
       stats.push(dstat("Gold share of total reserves", pct1(g.v), `${mLabel(g.i)} · this page; COFER counts currencies only`));
     }
     $("cofer-sub").textContent = `Which currencies the world's foreign exchange reserves are held in, ${qName(first.q)} to ${qName(last.q)} (IMF COFER, shares of the reserves whose currency is reported; gold is not part of it). `
-      + `The dollar: ${pct1(first.USD / 100)} then, ${pct1(last.USD / 100)} now. What left the dollar went mostly to smaller currencies and, outside this chart, to gold.`;
+      + `The dollar: ${pct1(first.USD / 100)} then, ${pct1(last.USD / 100)} now. The euro took ${pts((last.EUR - first.EUR) / 100)} of that; the rest went to smaller currencies. `
+      + "Gold sits outside COFER, so this chart can't show the move into it; the Reserves section does.";
     const series = [
       { name: "US dollar", cls: "", key: "USD" },
       { name: "Euro", cls: "s2", key: "EUR" },
