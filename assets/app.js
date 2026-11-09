@@ -894,7 +894,16 @@ function renderLatest(m, changes) {
       .filter((y) => has(y.v) && Math.abs(y.v) >= 0.05).sort((p, q) => Math.abs(q.v) - Math.abs(p.v));
     const what = [plural(e.counts?.new ?? 0, "new figure"), e.counts?.revised ? `${e.counts.revised} revised` : null,
       e.counts?.gone ? `${e.counts.gone} withdrawn` : null].filter(Boolean).join(", ");
-    const big = moves[0] ? ` (biggest: ${nameOf(moves[0].x.code)} ${signed(moves[0].v)} for ${mLabel(idx(moves[0].x.month))})` : "";
+    // Name the filers: the biggest mover if any figure moved; otherwise who filed, so a filing with no change isn't anonymous.
+    const items = e.items || [];
+    const one = (x, v) => `${nameOf(x.code)} ${signed(v)} for ${mLabel(idx(x.month))}`;
+    const names = [...new Set(items.map((x) => nameOf(x.code)))];
+    const listed = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`
+      : names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+    const big = !items.length ? ""
+      : items.length === 1 ? ` (${moves[0] ? one(items[0], moves[0].v) : `${nameOf(items[0].code)} for ${mLabel(idx(items[0].month))}, no change`})`
+      : moves[0] ? ` (biggest: ${one(moves[0].x, moves[0].v)})`
+      : ` (${listed}, no change)`;
     const effect = a && b && idx(a.complete) > idx(b.complete) ? `${mLabel(idx(a.complete))} entered the totals`
       : a && b && a.word !== b.word ? `the gauge went from ${b.word} to ${a.word}` : "nothing entered the totals";
     parts.push(h("strong", {}, `Latest IMF update, ${DAY.format(dayOf(e.date))}: `), `${what}${big}; ${effect}. `);
