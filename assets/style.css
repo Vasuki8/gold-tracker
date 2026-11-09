@@ -82,7 +82,10 @@ a:hover { text-decoration: underline; }
 .tabs-wrap[data-more~="start"] .tabs { --fade-l: 36px; }
 .tabs-wrap[data-more~="end"] .tabs { --fade-r: 36px; }
 .tabs::-webkit-scrollbar { display: none; }
-.tabs a { flex: none; padding: 17px 11px; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-2); border-bottom: 2px solid transparent; }
+.tabs a { position: relative; flex: none; padding: 17px 11px; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-2); border-bottom: 2px solid transparent; }
+/* A hairline before the first tab of each group (Who, Reserves, Updates), matching the menu's groups. */
+.tabs a.grp { margin-left: 9px; }
+.tabs a.grp::before { content: ""; position: absolute; left: -5px; top: 50%; translate: 0 -50%; width: 1px; height: 14px; background: var(--border-2); }
 .tabs a:hover { color: var(--ink); text-decoration: none; }
 .tabs a[aria-current="true"] { color: var(--ink); border-bottom-color: var(--ink); }
 .tabs-arrow {

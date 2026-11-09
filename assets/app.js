@@ -913,9 +913,10 @@ function renderFreshness(m) {
   const reportersNewest = m.holders.filter((d) => d.last === m.newest).length;
   const pending = [];
   for (let i = m.complete + 1; i <= m.newest; i++) pending.push(`${mLabel(i)} ${pct(m.months.get(i).coverage)}`);
-  $("freshness").textContent = `Newest IMF month: ${mLabel(m.newest)} (${reportersNewest} of ${m.holders.length} holders so far). `
-    + `Totals complete through ${mLabel(m.complete)}`
-    + (pending.length ? `; still being reported: ${pending.join(", ")}.` : ".");
+  // The Data tiles above already carry "complete through" and the pending months; this line adds
+  // what they don't: how many holders have filed the newest month, and the rule a month must pass.
+  $("freshness").textContent = `Newest IMF month ${mLabel(m.newest)}, filed by ${reportersNewest} of ${m.holders.length} holders so far. `
+    + (pending.length ? `A month enters the totals at ${pct(COVERAGE_MIN)} of activity weight; ${pending.join(" and ")} reported so far.` : "Every month is complete.");
 }
 
 function trendWord(r12, pace) {
@@ -968,7 +969,7 @@ function renderHero(m) {
       h("p", { class: "hero-label" }, "Net reported buying · last 12 months"),
       h("p", { class: "hero-value" }, signed(k.r12)),
       h("p", { class: "hero-asof" }, `As of ${mLabel(k.c)} · ${m.holders.length} holders · IMF IRFCL`),
-      h("p", { class: "hero-sub" }, `${mRange(k.c - 11, k.c)} · prior 12 months ${signed(k.prev12)} · newest IMF month ${mLabel(m.newest)}`)),
+      h("p", { class: "hero-sub" }, `${mRange(k.c - 11, k.c)} · prior 12 months ${signed(k.prev12)}`)),
     h("div", { class: "hero-aside" },
       h("span", { class: `pill ${d >= 0 ? "up" : "down"}` }, `${d >= 0 ? "▲" : "▼"} ${signed(d)}`, h("span", { class: "vs" }, "vs prior 12 months")),
       sparkline(m.rolling12.slice(-60).map((p) => p.v), 260, 64, k.r12 >= 0 ? "up" : "down")));
@@ -1224,7 +1225,8 @@ function renderWho(m) {
   const buyers = sorted.filter((x) => x.v >= 0.5).slice(0, 8);
   const sellers = sorted.filter((x) => x.v <= -0.5).slice(-5);
   const rows = [...buyers, ...sellers].map((x) => ({ name: x.d.name, v: x.v, d: x.d }));
-  $("who-sub").textContent = `Change in reported holdings, ${mRange(m.win.from, m.win.to)}: the ${buyers.length} biggest buyers and ${sellers.length} biggest sellers.`;
+  $("who-sub").textContent = `Change in reported holdings, ${mRange(m.win.from, m.win.to)}: the ${buyers.length} biggest buyers and ${sellers.length} biggest sellers. `
+    + `${mLabel(m.win.to)} is the last complete month; Momentum and the Top 15 table use each holder's own latest month instead, so a holder that has already filed ${mLabel(m.win.to + 1)} shows a different 12-month figure there.`;
   hbarChart($("chart-who"), {
     rows,
     splitAt: buyers.length && sellers.length ? buyers.length : 0,
@@ -1268,7 +1270,7 @@ function renderMomentum(m, select) {
   const live = m.holders.filter((d) => !d.stale);
   const streaks = live.filter((d) => d.streak >= 2).sort((a, b) => b.streak - a.streak || b.latest - a.latest).slice(0, 8);
   const started = live.filter((d) => d.started).sort((a, b) => b.latest - a.latest);
-  const stopped = live.filter((d) => d.stopped).sort((a, b) => b.latest - a.latest);
+  const stopped = live.filter((d) => d.stopped).sort((a, b) => b.lastBuy - a.lastBuy); // most recently quiet first
   $("momentum-sub").textContent = `Each holder measured at its own latest month. A purchase is a month with an increase of at least ${BUY_T} t.`;
   const nameBtn = (d) => h("button", { type: "button", class: "holder-btn", onclick: () => select(d.code, true) }, d.name);
   const card = (title, items, row, empty) => h("div", { class: "list-card" }, h("h3", {}, title),
@@ -1512,14 +1514,14 @@ function renderNotes(m, r) {
       h("li", {}, `${nameOf(code)}: ${plural(items.length, "month")} (${monthList(items.map((x) => x[0]))}), ${[...new Set(items.map((x) => x[2].split(" (")[0].split(" from ")[0]))].join("; ")}`))) : null,
     h("h3", {}, "Groups, regions and momentum"),
     h("p", {}, "Advanced economies follow the IMF World Economic Outlook list, with the ECB counted as advanced; every other holder is emerging or developing. Regions are this page's own grouping, close to the IMF's: Russia and Turkey sit in Europe, Kazakhstan and Egypt in Middle East, North Africa and Central Asia."),
-    h("p", {}, `A purchase is a month with an increase of at least ${BUY_T} t. "Started buying again" means a purchase in a holder's last 6 reported months after none in the 12 before; "stopped" means none in the last 6 after at least 3 in the 12 before.`),
+    h("p", {}, `A purchase is a month with an increase of at least ${BUY_T} t. “Started buying again” means a purchase in a holder's last 6 reported months after none in the 12 before; “stopped” means none in the last 6 after at least 3 in the 12 before.`),
     h("p", {}, `Breadth counts holders whose reported gold changed by at least ${BREADTH_T} t over the 12 months to each month, each holder from its own figures. Concentration is the two biggest buyers' share of gross buying (every holder with a 12-month increase, added up); it is left out where gross buying is under 25 t, since then any two buyers are nearly all of it.`),
     h("h3", {}, "Updates and alerts"),
     h("p", {}, "When the daily job finds new or revised IMF figures, spike/changes.py compares them with the previous commit and records the difference in data/changes.json. It recomputes the headline gauge before and after, the same way this page does. If a month enters the totals, the gauge's word changes or one holder moves 20 t or more in a month (or a past month is revised by 10 t or more), it opens a GitHub issue assigned to the repo owner; GitHub sends the email."),
     h("h3", {}, "Funds"),
     h("p", {}, "The Funds panel is market data, not official reserves, and it comes from two other sources, loaded by your browser when the page opens: SPDR Gold Shares' historical archive (the GLD trust's tonnes of gold, daily) and the CFTC's Commitments of Traders report for COMEX gold (weekly). Neither is copied into this repo; the GLD archive's terms don't allow redistribution. If either source is down, only that chart is missing."),
     h("h3", {}, "Mine production"),
-    h("p", {}, "Yearly mine output by country. The two latest years come from the USGS Mineral Commodity Summaries (the newest year is a USGS estimate); a monthly job, separate from the daily IMF job, fetches them and commits data/production_usgs.json when they change. Earlier years, back to 1900, come from Our World in Data, which combines USGS and British Geological Survey figures; your browser loads them, because the BGS keeps copyright in its figures. For the USGS years the page uses only the USGS figures, so smaller producers are grouped as \"Other countries\". The share of mine output divides a calendar year's net reported central bank change by world mine production that year."),
+    h("p", {}, "Yearly mine output by country. The two latest years come from the USGS Mineral Commodity Summaries (the newest year is a USGS estimate); a monthly job, separate from the daily IMF job, fetches them and commits data/production_usgs.json when they change. Earlier years, back to 1900, come from Our World in Data, which combines USGS and British Geological Survey figures; your browser loads them, because the BGS keeps copyright in its figures. For the USGS years the page uses only the USGS figures, so smaller producers are grouped as “Other countries”. The share of mine output divides a calendar year's net reported central bank change by world mine production that year."),
     h("h3", {}, "Gold's share of reserves"),
     h("p", {}, "Countries value their gold differently, so the reported dollar values can't be used as they are. This page takes one price per month, the median dollars per ounce across all holders with at least 1 t (it tracks the market price), revalues every holder's gold at it, and replaces the reported gold value inside total reserves with that market value."),
     revalued.length ? h("p", {}, `Holders whose own value is more than 10% off that price, mostly because they use an old official price or historical cost: ${revalued.map((x) => x.name).join(", ")}. The US, for example, values its gold at the statutory $42.22 an ounce.`) : null,
@@ -1529,13 +1531,13 @@ function renderNotes(m, r) {
     h("h3", {}, "Buying and the price"),
     h("p", {}, "Each complete month since net buying took hold is one dot: the implied gold price's change over the month against the reported net change in holdings. The correlation is Pearson's, on monthly figures. Months are grouped by price move at ±3%. Seasonality averages the reported change for each calendar month over whole years only."),
     h("h3", {}, "Revisions and who is late"),
-    h("p", {}, "Every figure that first appeared in data/changes.json is compared with the figure the IMF shows for that holder and month now; a difference of 0.05 t or more, or a withdrawn figure, counts as a revision. The delay a holder's figures usually take is the median gap between a month's end and the day its figure first arrived, so it needs a few filings per holder before it shows. 'Filers needed' adds the missing holders in order of activity weight until the next month would reach 90%."),
+    h("p", {}, "Every figure that first appeared in data/changes.json is compared with the figure the IMF shows for that holder and month now; a difference of 0.05 t or more, or a withdrawn figure, counts as a revision. The delay a holder's figures usually take is the median gap between a month's end and the day its figure first arrived, so it needs a few filings per holder before it shows. “Filers needed” adds the missing holders in order of activity weight until the next month would reach 90%."),
     h("h3", {}, "Treasuries and reserve currencies"),
-    h("p", {}, "Foreign official holdings of US Treasuries come from the US Treasury's TIC 'Major Foreign Holders' tables (monthly, US$ billions, attributed to the custodian's country, so Belgium and Luxembourg stand in for others). Reserve currency shares come from the IMF's COFER: the share of foreign exchange reserves whose currency is reported, so gold is not in them. A monthly job fetches both (scripts: spike/fetch_tic.py, spike/fetch_cofer.py; logs: data/fetch_log_tic.csv, data/fetch_log_cofer.csv), separate from the daily gold job."),
+    h("p", {}, "Foreign official holdings of US Treasuries come from the US Treasury's TIC “Major Foreign Holders” tables (monthly, US$ billions, attributed to the custodian's country, so Belgium and Luxembourg stand in for others). Reserve currency shares come from the IMF's COFER: the share of foreign exchange reserves whose currency is reported, so gold is not in them. A monthly job fetches both (scripts: spike/fetch_tic.py, spike/fetch_cofer.py; logs: data/fetch_log_tic.csv, data/fetch_log_cofer.csv), separate from the daily gold job."),
     h("h3", {}, "Reported against the World Gold Council's estimate"),
-    h("p", {}, "The WGC's Gold Demand Trends estimates total central bank buying each quarter, including purchases not reported by any country, from its own research and trade data. Its figures are typed into data/wgc_central_banks.json by hand from the report pages, each the latest revision found there. 'Reported' is this page's sum of monthly net changes over the quarter; the undisclosed share is one minus reported over estimated."),
+    h("p", {}, "The WGC's Gold Demand Trends estimates total central bank buying each quarter, including purchases not reported by any country, from its own research and trade data. Its figures are typed into data/wgc_central_banks.json by hand from the report pages, each the latest revision found there. “Reported” is this page's sum of monthly net changes over the quarter; the undisclosed share is one minus reported over estimated."),
     h("h3", {}, "Reading the gauge"),
-    h("p", {}, "\"Speeding up\" compares the last three months, scaled to a year, with the 12-month total; within 15% counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars."),
+    h("p", {}, "“Speeding up” compares the last three months, scaled to a year, with the 12-month total; within 15% counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars."),
   );
 }
 
@@ -1613,7 +1615,9 @@ function renderUpdates(changes) {
         e.counts.gone ? h("span", { class: "tag" }, `${e.counts.gone} withdrawn`) : null,
         a && b && idx(a.complete) > idx(b.complete) ? h("span", { class: "tag accent" }, `${mLabel(idx(a.complete))} now in the totals`) : null,
         a && b && a.word !== b.word ? h("span", { class: "tag accent" }, `${b.word} → ${a.word}`) : null),
-      a && b ? h("p", { class: "update-gauge" }, `12-month net ${signed(b.r12)} → `, sv(a.r12), ` · totals through ${mLabel(idx(a.complete))} · ${a.word}`) : null,
+      a && b ? h("p", { class: "update-gauge" },
+        ...(Math.abs(a.r12 - b.r12) < 0.05 ? ["12-month net unchanged at ", sv(a.r12)] : [`12-month net ${signed(b.r12)} → `, sv(a.r12)]),
+        ` · totals through ${mLabel(idx(a.complete))} · ${a.word}`) : null,
       top.length ? h("ul", {}, top.map(item)) : null,
       shown.length > top.length || quiet ? h("p", { class: "update-more" },
         [shown.length > top.length ? `${plural(shown.length - top.length, "more change")}` : null,
@@ -1921,6 +1925,7 @@ function buildProduction(usgs, owid) {
 
 let PROD = null; // mine production, once loaded (see loadProduction)
 const prodTitle = (yr) => `${yr.y}${yr.est ? " (USGS estimate)" : ""}`;
+const mined = (v) => `${NF0.format(v)} t`; // USGS rounds output to tens of tonnes
 const producers = (yr) => [...yr.by.entries()].map(([code, x]) => ({ code, ...x })).sort((a, b) => b.v - a.v);
 
 // A holder's reported change over calendar year y: null when it isn't in the IMF data at all.
@@ -1938,7 +1943,7 @@ function minedStat(m, code) {
   const v = yr?.by.get(code).v;
   if (!v || v < 1) return null;
   const rank = [...yr.by.values()].filter((x) => x.v > v).length + 1;
-  return dstat(`Mined in ${yr.y}`, tonnes(v), `${rank === 1 ? "Largest" : `${ordinal(rank)} largest`} producer${yr.by.get(code).est ? " · USGS estimate" : ""}`);
+  return dstat(`Mined in ${yr.y}`, mined(v), `${rank === 1 ? "Largest" : `${ordinal(rank)} largest`} producer${yr.by.get(code).est ? " · USGS estimate" : ""}`);
 }
 
 function renderSupply(m, p, owidErr) {
@@ -1955,17 +1960,17 @@ function renderSupply(m, p, owidErr) {
   $("supply-sub").textContent = "Gold mined each year, worldwide and by country, next to what central banks reported adding. Mine output changes slowly"
     + (share.length >= 5 ? `; reported central bank buying has not. It has ranged from ${low.v < 0 ? `net selling of ${pct(-low.v)}` : pct(low.v)} of it (${low.i}) to net buying of ${pct(peak.v)} (${peak.i}).` : ".");
   put("supply-stats",
-    dstat(`Mined worldwide, ${latest.y}`, tonnes(latest.world), latest.est ? "USGS estimate" : "USGS"),
-    back10 ? dstat(`Versus ${back10.y}`, delta(growth, `${pct(Math.abs(growth))}`, 0.005), `${tonnes(back10.world)} then`) : null,
+    dstat(`Mined worldwide, ${latest.y}`, mined(latest.world), latest.est ? "USGS estimate" : "USGS"),
+    back10 ? dstat(`Versus ${back10.y}`, delta(growth, `${pct(Math.abs(growth))}`, 0.005), `${mined(back10.world)} then`) : null,
     lastS ? dstat(`Central banks, ${lastS.i}`, sv(lastS.cb), `reported net, ${pct(lastS.v)} of mine output`) : null,
-    share.length >= 5 ? dstat("Highest share", pct(peak.v), `${peak.i}: ${signed(peak.cb)} of ${tonnes(peak.yr.world)}`) : null,
-    tops[0] ? dstat("Largest producer", p.name(tops[0].code), `${tonnes(tops[0].v)}, ${pct(tops[0].v / latest.world)} of the world's`) : null);
+    share.length >= 5 ? dstat("Highest share", pct(peak.v), `${peak.i}: ${signed(peak.cb)} of ${mined(peak.yr.world)}`) : null,
+    tops[0] ? dstat("Largest producer", p.name(tops[0].code), `${mined(tops[0].v)}, ${pct(tops[0].v / latest.world)} of the world's`) : null);
 
   // The headline row gets the share too: it is the one number here that moves with central banks.
   const pace = document.querySelector('#stat-groups [data-group="Pace"]');
   if (pace && lastS) {
     pace.querySelector(".stat.supply")?.remove();
-    const st = stat("Share of mine output", pct(lastS.v), [`${lastS.i}: ${signed(lastS.cb)} reported, ${tonnes(lastS.yr.world)} mined`]);
+    const st = stat("Share of mine output", pct(lastS.v), [`${lastS.i}: ${signed(lastS.cb)} reported, ${mined(lastS.yr.world)} mined`]);
     st.classList.add("supply");
     pace.append(st);
   }
@@ -1985,7 +1990,7 @@ function renderSupply(m, p, owidErr) {
         { value: pct1(b.v), label: "of mine output", key: b.v >= 0 ? "buy" : "sell" },
         "sep",
         { value: signed(b.x.cb), label: "central banks, net reported" },
-        { value: tonnes(b.x.yr.world), label: "mined worldwide" },
+        { value: mined(b.x.yr.world), label: "mined worldwide" },
       ],
     });
   }
@@ -1995,11 +2000,11 @@ function renderSupply(m, p, owidErr) {
   lineChart($("chart-supply-world"), {
     points: wp,
     height: 220,
-    endLabel: (q) => tonnes(q.v),
+    endLabel: (q) => mined(q.v),
     tipTitle: (q) => prodTitle(q.yr),
-    label: `Line chart of world gold mine production per year, ${wp[0].yr.y} to ${latest.y}. Latest ${tonnes(latest.world)}.`,
-    tipRows: (q) => [{ value: tonnes(q.v), label: "mined worldwide", key: "line" },
-      ...producers(q.yr).slice(0, 3).map((x) => ({ value: tonnes(x.v), label: p.name(x.code) }))],
+    label: `Line chart of world gold mine production per year, ${wp[0].yr.y} to ${latest.y}. Latest ${mined(latest.world)}.`,
+    tipRows: (q) => [{ value: mined(q.v), label: "mined worldwide", key: "line" },
+      ...producers(q.yr).slice(0, 3).map((x) => ({ value: mined(x.v), label: p.name(x.code) }))],
   });
 
   // Largest producers, and what their own central bank reported doing that year.
@@ -2014,14 +2019,14 @@ function renderSupply(m, p, owidErr) {
   const rows = tops.slice(0, 15).map((x) => ({ name: p.name(x.code), v: x.v, x }));
   $("producers-h").textContent = `Largest producers in ${latest.y}`;
   $("producers-sub").textContent = `Tonnes mined${latest.est ? " (USGS estimates)" : ""}`
-    + (latest.other ? `; all other countries together mined ${tonnes(latest.other)} (${pct(latest.other / latest.world)} of the world's).` : ".")
+    + (latest.other ? `; all other countries together mined ${mined(latest.other)} (${pct(latest.other / latest.world)} of the world's).` : ".")
     + " Hover a bar for what that country's central bank reported in the same year: some buy local mine output (Kazakhstan's has first refusal on it), most don't.";
   hbarChart($("chart-producers"), {
     rows,
     neutral: true,
-    fmt: tonnes,
-    label: `Bar chart of gold mine production by country in ${latest.y}. Largest: ${rows[0].name}, ${tonnes(rows[0].v)}.`,
-    tipRows: (r) => [{ value: tonnes(r.v), label: "mined" }, { value: pct1(r.v / latest.world), label: "of world output" },
+    fmt: mined,
+    label: `Bar chart of gold mine production by country in ${latest.y}. Largest: ${rows[0].name}, ${mined(rows[0].v)}.`,
+    tipRows: (r) => [{ value: mined(r.v), label: "mined" }, { value: pct1(r.v / latest.world), label: "of world output" },
       "sep", cbLine(r.x.code)],
   });
   if (latest.other) rows.push({ name: "Other countries", v: latest.other, x: null }); // table only
@@ -2032,10 +2037,10 @@ function renderSupply(m, p, owidErr) {
         const old = r.x ? back10?.by.get(r.x.code)?.v : back10?.other;
         const cb = r.x ? cbYear(m, r.x.code, latest.y) : null;
         const cbv = cb?.v;
-        return [r.name, tonnes(r.v), pct1(r.v / latest.world), old === undefined || old === null ? "–" : sv(r.v - old),
+        return [r.name, mined(r.v), pct1(r.v / latest.world), old === undefined || old === null ? "–" : sv(r.v - old),
           !r.x ? "–" : !cb ? "not in IMF data" : cbv === undefined ? "–" : sv(cbv),
           cbv === undefined ? "–" : pct(cbv / r.v)];
-      }), ["World", tonnes(latest.world), "100.0%", back10 ? sv(latest.world - back10.world) : "–", lastS?.i === latest.y ? sv(lastS.cb) : "–",
+      }), ["World", mined(latest.world), "100.0%", back10 ? sv(latest.world - back10.world) : "–", lastS?.i === latest.y ? sv(lastS.cb) : "–",
         lastS?.i === latest.y ? pct(lastS.v) : "–"]])));
 
   const owidNote = owidErr ? ` Our World in Data didn't load (${owidErr.message || owidErr}), so only the USGS years are shown.` : "";
@@ -2131,7 +2136,7 @@ function renderJournal(m, j) {
   })) : h("p", { class: "chart-note" }, "No entries yet."));
   $("journal-note").replaceChildren("To change the trigger or add an entry, edit ", h("a", { href: JOURNAL_EDIT }, "data/journal.json"),
     " on GitHub (a date and a sentence per entry) and commit to main; GitHub Pages rebuilds the page within a minute. A year on, the list shows whether acting on the gauge helped.");
-  $("table-journal").replaceChildren(runs.length ? tableDetails("Show the periods below the line as a table",
+  put("table-journal", runs.length ? tableDetails("Show the periods below the line as a table",
     table(`Periods when the 12-month net was below your trigger (${signed(t)})`, ["From", "To", "Months", "Lowest"],
       runs.slice().reverse().map((x) => [mLabel(x.from), x.to === now.i ? `${mLabel(x.to)} (now)` : mLabel(x.to), count(x.to - x.from + 1), sv(x.low.v)]))) : null);
 }
@@ -2260,9 +2265,9 @@ function renderQuality(m, changes) {
       tipRows: (q) => [{ value: sv(q.v).textContent, label: "since first print", key: q.v >= 0 ? "buy" : "sell" },
         { value: tonnes(q.x.t), label: `first print, ${DAY.format(dayOf(q.x.date))}` }, { value: tonnes(q.x.now), label: "now" }] });
   } else emptyChart($("chart-revisions"), "No revisions recorded yet.");
-  $("table-revisions").replaceChildren(events.length ? tableDetails("Show revision events as a table",
+  put("table-revisions", events.length ? tableDetails("Show revision events as a table",
     table("Revisions recorded by the daily job", ["Recorded", "Holder", "Month", "Was", "Now", "Change"],
-      events.slice().reverse().map((x) => [DAY.format(dayOf(x.date)), nameOf(x.code), mLabel(idx(x.month)), tonnes(x.was), tonnes(x.t), sv(x.t - x.was)]), { scroll: true })) : null);
+      events.slice().reverse().map((x) => [DAY.format(dayOf(x.date)), nameOf(x.code), mLabel(idx(x.month)), tonnes(x.was), tonnes(x.t), sv(x.t - x.was)]), { scroll: true })) : null); // put(), not replaceChildren(): a bare null would print as "null"
 
   // The calendar: who still has to file for the next month to count, and how late each usually is.
   const active = m.holders.filter((d) => !d.stale);
@@ -2286,7 +2291,8 @@ function renderQuality(m, changes) {
     dstat("Holders 2+ months behind", count(behind), `of ${active.length} active`),
     dstat("Typical delay", allLags.length ? `${Math.round(median(allLags))} days` : "learning", allLags.length ? `after month end · ${plural(allLags.length, "filing")} seen` : "measured as filings arrive"));
   if (missing.length) {
-    hbarChart($("chart-calendar"), { rows: missing.slice(0, 12).map((d) => ({ name: d.name, v: d.activity / totalA, d })), neutral: true, fmt: pct1,
+    // Holders with no activity weight can't move the month over the line, so they stay in the table only.
+    hbarChart($("chart-calendar"), { rows: missing.filter((d) => d.activity / totalA >= 0.0005).slice(0, 12).map((d) => ({ name: d.name, v: d.activity / totalA, d })), neutral: true, fmt: pct1,
       label: `Bar chart of the activity weight of holders that have not yet reported ${mLabel(next)}.`,
       tipRows: (q) => [{ value: pct1(q.v), label: "share of activity weight" }, { value: mLabel(q.d.last), label: "latest report" },
         ...(typical(q.d.code) !== undefined ? [{ value: `${Math.round(typical(q.d.code))} days`, label: "usual delay after month end" }] : [])] });
@@ -2412,10 +2418,14 @@ function renderUnreported(m, wgc) {
       tipExtra: (k) => (qs[k].rep !== null ? [{ value: hidden(qs[k].v, qs[k].rep), label: "not disclosed by country" }] : [{ value: "–", label: "quarter not yet complete in the IMF data" }]),
     });
   } else emptyChart($("chart-unreported"));
+  // The Overview's caveat gets the measured share instead of a typed-in number that would go stale.
+  if (last4.length && $("caveat-text")) {
+    $("caveat-text").textContent = `The World Gold Council estimates that most central bank buying is not disclosed by country (${hidden(sumW(last4), sumR(last4))} of its estimate over the last ${plural(last4.length, "quarter")} it has reported, to ${qName(latest.q)}), so the real total is larger than this.`;
+  }
   $("unreported-note").replaceChildren(`Hand-kept: the WGC figures are typed in from its Gold Demand Trends report pages (the data tables behind them need a login), each the latest revision found there${wgc.entered ? `, last entered ${DAY.format(dayOf(wgc.entered))}` : ""}. `,
     "The WGC revises past quarters as buying comes to light, sometimes by a lot. Edit ", h("a", { href: "https://github.com/Vasuki8/gold-tracker/edit/main/data/wgc_central_banks.json" }, "data/wgc_central_banks.json"), " after each quarterly report.");
   const row = (x, name) => [name, signed(x.v), x.rep === null ? "–" : signed(x.rep), x.rep === null ? "–" : hidden(x.v, x.rep), x.from];
-  $("table-unreported").replaceChildren(
+  put("table-unreported",
     qs.length ? tableDetails("Show quarters as a table", table("Quarterly central bank buying: WGC estimate vs reported to the IMF, tonnes", ["Quarter", "WGC estimate", "Reported", "Not disclosed", "WGC figure from"],
       qs.slice().reverse().map((x) => row(x, qName(x.q))), { scroll: true })) : null,
     ys.length ? tableDetails("Show years as a table", table("Yearly central bank buying: WGC estimate vs reported to the IMF, tonnes", ["Year", "WGC estimate", "Reported", "Not disclosed", "WGC figure from"],

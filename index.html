@@ -32,23 +32,23 @@
           <a href="#gauge">Overview</a>
           <a href="#trend">Trend</a>
           <a href="#journal">Journal</a>
-          <a href="#unreported">Unreported</a>
           <a href="#years">Years</a>
-          <a href="#supply">Supply</a>
           <a href="#months">Months</a>
           <a href="#price">Price</a>
-          <a href="#updates">Updates</a>
-          <a href="#quality">Quality</a>
-          <a href="#who">Who</a>
+          <a href="#unreported">Unreported</a>
+          <a href="#who" class="grp">Who</a>
           <a href="#groups">Groups</a>
           <a href="#momentum">Momentum</a>
           <a href="#breadth">Breadth</a>
-          <a href="#reserves">Reserves</a>
-          <a href="#dollar">Dollar</a>
-          <a href="#board">Holders</a>
-          <a href="#country">Holder</a>
+          <a href="#board">Top 15</a>
+          <a href="#country">One holder</a>
           <a href="#compare">Compare</a>
+          <a href="#reserves" class="grp">Reserves</a>
+          <a href="#dollar">Dollar</a>
+          <a href="#supply">Supply</a>
           <a href="#funds">Funds</a>
+          <a href="#updates" class="grp">Updates</a>
+          <a href="#quality">Quality</a>
           <a href="#method">Method</a>
         </nav>
         <button type="button" class="tabs-arrow next" data-dir="1" aria-hidden="true" tabindex="-1">&#8250;</button>
@@ -66,10 +66,10 @@
           <h3>Pace</h3>
           <a href="#gauge">Overview<small>Headline numbers: 3 and 12 months, speeding up or slowing</small></a>
           <a href="#trend">Trend<small>Rolling 12-month net buying since 2000, with the price</small></a>
+          <a href="#journal">Journal<small>Your trigger line and decision notes</small></a>
           <a href="#years">Years<small>Net change per calendar year</small></a>
           <a href="#months">Months<small>Monthly bars, buyers and sellers each month</small></a>
           <a href="#price">Price<small>Buying against price moves, seasonality</small></a>
-          <a href="#journal">Journal<small>Your trigger line and decision notes</small></a>
           <a href="#unreported">Unreported<small>WGC's estimate of all buying vs what is reported</small></a>
         </div>
         <div class="menu-group">
@@ -78,8 +78,8 @@
           <a href="#groups">Groups<small>Emerging vs advanced economies, regions</small></a>
           <a href="#momentum">Momentum<small>Streaks, who started and who stopped</small></a>
           <a href="#breadth">Breadth<small>How many holders are adding vs cutting</small></a>
-          <a href="#board">Holders<small>The largest reported holdings, ranked</small></a>
-          <a href="#country">Holder<small>One holder in depth</small></a>
+          <a href="#board">Top 15<small>The largest reported holdings, ranked</small></a>
+          <a href="#country">One holder<small>Rank, streak, biggest months, share of its reserves</small></a>
           <a href="#compare">Compare<small>Up to three holders side by side</small></a>
         </div>
         <div class="menu-group">
@@ -107,7 +107,7 @@
       <section id="gauge" aria-label="Overview">
         <div class="card hero" id="hero"></div>
         <div class="stat-groups" id="stat-groups"></div>
-        <p class="caveat"><span class="tag">Reported only</span> The World Gold Council estimates that most central bank buying is not disclosed by country (about 63% of activity in Q3 2026), so the real total is larger than this. Read these numbers for direction and pace, not the full amount.</p>
+        <p class="caveat"><span class="tag">Reported only</span> <span id="caveat-text">The World Gold Council estimates that most central bank buying is not disclosed by country, so the real total is larger than this.</span> Read these numbers for direction and pace, not the full amount.</p>
         <p class="freshness" id="freshness"></p>
       </section>
 
@@ -141,40 +141,12 @@
         <div id="table-journal"></div>
       </section>
 
-      <section class="card" id="unreported" aria-labelledby="unreported-h">
-        <h2 id="unreported-h">Reported buying against the World Gold Council's estimate</h2>
-        <p class="sub" id="unreported-sub"></p>
-        <dl class="stats" id="unreported-stats"></dl>
-        <div class="legend" id="unreported-legend"></div>
-        <div class="chart" id="chart-unreported"></div>
-        <p class="chart-note" id="unreported-note"></p>
-        <div id="table-unreported"></div>
-      </section>
-
       <section class="card" id="years" aria-labelledby="years-h">
         <h2 id="years-h">Year by year</h2>
         <p class="sub" id="years-sub"></p>
         <div class="chart" id="chart-years"></div>
         <p class="chart-note" id="years-note"></p>
         <div id="table-years"></div>
-      </section>
-
-      <section class="card" id="supply" aria-labelledby="supply-h">
-        <h2 id="supply-h">Against mine production</h2>
-        <p class="sub" id="supply-sub">Loading mine production from the USGS and Our World in Data…</p>
-        <dl class="stats" id="supply-stats"></dl>
-        <h3 class="h3">Reported central bank buying as a share of what is mined</h3>
-        <p class="sub small" id="supply-share-sub"></p>
-        <div class="chart" id="chart-supply-share"></div>
-        <h3 class="h3">World gold mine production</h3>
-        <p class="sub small" id="supply-world-sub"></p>
-        <div class="chart" id="chart-supply-world"></div>
-        <h3 class="h3" id="producers-h">Largest producers</h3>
-        <p class="sub small" id="producers-sub"></p>
-        <div class="chart" id="chart-producers"></div>
-        <div id="table-producers"></div>
-        <p class="chart-note" id="supply-note"></p>
-        <div id="table-supply"></div>
       </section>
 
       <section class="card" id="months" aria-labelledby="monthly-h">
@@ -197,24 +169,14 @@
         <div id="table-price"></div>
       </section>
 
-      <section class="card" id="updates" aria-labelledby="updates-h">
-        <h2 id="updates-h">Updates from the IMF</h2>
-        <p class="sub" id="updates-sub"></p>
-        <div id="updates-list"></div>
-      </section>
-
-      <section class="card" id="quality" aria-labelledby="quality-h">
-        <h2 id="quality-h">Data quality: revisions and who is late</h2>
-        <h3 class="h3 first">How much the figures get revised</h3>
-        <p class="sub" id="revisions-sub"></p>
-        <dl class="stats" id="revisions-stats"></dl>
-        <div class="chart" id="chart-revisions"></div>
-        <div id="table-revisions"></div>
-        <h3 class="h3">Who still has to file</h3>
-        <p class="sub" id="calendar-sub"></p>
-        <dl class="stats" id="calendar-stats"></dl>
-        <div class="chart" id="chart-calendar"></div>
-        <div id="table-calendar"></div>
+      <section class="card" id="unreported" aria-labelledby="unreported-h">
+        <h2 id="unreported-h">Reported buying against the World Gold Council's estimate</h2>
+        <p class="sub" id="unreported-sub"></p>
+        <dl class="stats" id="unreported-stats"></dl>
+        <div class="legend" id="unreported-legend"></div>
+        <div class="chart" id="chart-unreported"></div>
+        <p class="chart-note" id="unreported-note"></p>
+        <div id="table-unreported"></div>
       </section>
 
       <section class="card" id="who" aria-labelledby="who-h">
@@ -251,49 +213,6 @@
         <p class="sub small" id="concentration-sub"></p>
         <div class="chart" id="chart-concentration"></div>
         <div id="table-breadth"></div>
-      </section>
-
-      <section class="card" id="reserves" aria-labelledby="reserves-h">
-        <h2 id="reserves-h">Gold as a share of reserves</h2>
-        <p class="sub" id="reserves-sub"></p>
-        <div class="chart" id="chart-share"></div>
-        <div id="table-share"></div>
-        <h3 class="h3">Gold and everything else in reserves</h3>
-        <p class="sub small" id="mix-sub"></p>
-        <div class="legend" id="mix-legend"></div>
-        <div class="chart" id="chart-mix"></div>
-        <div id="table-mix"></div>
-        <div class="split charts">
-          <div>
-            <h3 class="h3">Largest holders: gold as % of their reserves</h3>
-            <div class="chart" id="chart-share-holders"></div>
-          </div>
-          <div>
-            <h3 class="h3">Gold price implied by the IMF data</h3>
-            <p class="sub small">Median US dollars per ounce across all reporting holders. It tracks the market price.</p>
-            <div class="chart" id="chart-price"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card" id="dollar" aria-labelledby="dollar-h">
-        <h2 id="dollar-h">Gold against the dollar</h2>
-        <p class="sub">Central banks keep most of their reserves in US Treasuries and gold. Treasuries come from the US Treasury's TIC data (monthly), reserve currencies from the IMF's COFER (quarterly); a monthly job fetches both, separate from the daily gold job.</p>
-        <dl class="stats" id="dollar-stats"></dl>
-        <div id="treasuries-block">
-          <h3 class="h3">US Treasuries held by foreign official institutions</h3>
-          <p class="sub small" id="treasuries-sub"></p>
-          <div class="chart" id="chart-treasuries"></div>
-          <h3 class="h3">12-month change in those holdings, US$ billions</h3>
-          <div class="chart" id="chart-treasuries-change"></div>
-        </div>
-        <div id="cofer-block">
-          <h3 class="h3">Currency shares of world foreign exchange reserves</h3>
-          <p class="sub small" id="cofer-sub"></p>
-          <div class="legend" id="cofer-legend"></div>
-          <div class="chart" id="chart-cofer"></div>
-        </div>
-        <div id="table-dollar"></div>
       </section>
 
       <section class="card" id="board" aria-labelledby="board-h">
@@ -347,6 +266,67 @@
         <div id="table-compare"></div>
       </section>
 
+      <section class="card" id="reserves" aria-labelledby="reserves-h">
+        <h2 id="reserves-h">Gold as a share of reserves</h2>
+        <p class="sub" id="reserves-sub"></p>
+        <div class="chart" id="chart-share"></div>
+        <div id="table-share"></div>
+        <h3 class="h3">Gold and everything else in reserves</h3>
+        <p class="sub small" id="mix-sub"></p>
+        <div class="legend" id="mix-legend"></div>
+        <div class="chart" id="chart-mix"></div>
+        <div id="table-mix"></div>
+        <div class="split charts">
+          <div>
+            <h3 class="h3">Largest holders: gold as % of their reserves</h3>
+            <div class="chart" id="chart-share-holders"></div>
+          </div>
+          <div>
+            <h3 class="h3">Gold price implied by the IMF data</h3>
+            <p class="sub small">Median US dollars per ounce across all reporting holders. It tracks the market price.</p>
+            <div class="chart" id="chart-price"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="dollar" aria-labelledby="dollar-h">
+        <h2 id="dollar-h">Gold against the dollar</h2>
+        <p class="sub">Central banks keep most of their reserves in US Treasuries and gold. Treasuries come from the US Treasury's TIC data (monthly), reserve currencies from the IMF's COFER (quarterly); a monthly job fetches both, separate from the daily gold job.</p>
+        <dl class="stats" id="dollar-stats"></dl>
+        <div id="treasuries-block">
+          <h3 class="h3">US Treasuries held by foreign official institutions</h3>
+          <p class="sub small" id="treasuries-sub"></p>
+          <div class="chart" id="chart-treasuries"></div>
+          <h3 class="h3">12-month change in those holdings, US$ billions</h3>
+          <div class="chart" id="chart-treasuries-change"></div>
+        </div>
+        <div id="cofer-block">
+          <h3 class="h3">Currency shares of world foreign exchange reserves</h3>
+          <p class="sub small" id="cofer-sub"></p>
+          <div class="legend" id="cofer-legend"></div>
+          <div class="chart" id="chart-cofer"></div>
+        </div>
+        <div id="table-dollar"></div>
+      </section>
+
+      <section class="card" id="supply" aria-labelledby="supply-h">
+        <h2 id="supply-h">Against mine production</h2>
+        <p class="sub" id="supply-sub">Loading mine production from the USGS and Our World in Data…</p>
+        <dl class="stats" id="supply-stats"></dl>
+        <h3 class="h3">Reported central bank buying as a share of what is mined</h3>
+        <p class="sub small" id="supply-share-sub"></p>
+        <div class="chart" id="chart-supply-share"></div>
+        <h3 class="h3">World gold mine production</h3>
+        <p class="sub small" id="supply-world-sub"></p>
+        <div class="chart" id="chart-supply-world"></div>
+        <h3 class="h3" id="producers-h">Largest producers</h3>
+        <p class="sub small" id="producers-sub"></p>
+        <div class="chart" id="chart-producers"></div>
+        <div id="table-producers"></div>
+        <p class="chart-note" id="supply-note"></p>
+        <div id="table-supply"></div>
+      </section>
+
       <section class="card" id="funds" aria-labelledby="funds-h">
         <div class="panel-head">
           <h2 id="funds-h">Funds: ETF holdings and futures bets</h2>
@@ -367,6 +347,26 @@
         <div class="chart" id="chart-cftc"></div>
         <p class="chart-note" id="cftc-note"></p>
         <div id="table-funds"></div>
+      </section>
+
+      <section class="card" id="updates" aria-labelledby="updates-h">
+        <h2 id="updates-h">Updates from the IMF</h2>
+        <p class="sub" id="updates-sub"></p>
+        <div id="updates-list"></div>
+      </section>
+
+      <section class="card" id="quality" aria-labelledby="quality-h">
+        <h2 id="quality-h">Data quality: revisions and who is late</h2>
+        <h3 class="h3 first">How much the figures get revised</h3>
+        <p class="sub" id="revisions-sub"></p>
+        <dl class="stats" id="revisions-stats"></dl>
+        <div class="chart" id="chart-revisions"></div>
+        <div id="table-revisions"></div>
+        <h3 class="h3">Who still has to file</h3>
+        <p class="sub" id="calendar-sub"></p>
+        <dl class="stats" id="calendar-stats"></dl>
+        <div class="chart" id="chart-calendar"></div>
+        <div id="table-calendar"></div>
       </section>
 
       <section class="card notes" id="method" aria-labelledby="notes-h">
