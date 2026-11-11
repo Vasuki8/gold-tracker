@@ -1,6 +1,6 @@
 # Does the alert job count a month exactly as the page does? spike/changes.py carries a Python
 # port of the page's gauge; this runs both on the committed data and a few edited copies and
-# fails if they disagree. Runs only when code changes, not on the data commits the fetch jobs make.
+# fails if they disagree; a second test checks the cleaning rules in fetch_irfcl.py. Runs only when code changes, not on the data commits the fetch jobs make.
 name: Test gauge consistency
 
 on:
@@ -27,3 +27,5 @@ jobs:
       - run: node --version && python3 --version
       - name: changes.py and app.js must agree on the gauge
         run: python3 spike/test_gauge.py
+      - name: The cleaning rules repair and drop what they say, and re-cleaning the committed data is a no-op
+        run: python3 spike/test_cleaning.py

@@ -32,6 +32,11 @@ const BRIDGE_MONTHS = 3; // a change may span up to 3 missing months (dropped or
 const TOP_N = 15;
 const BUY_T = 0.1; // a month with an increase of at least 0.1 t counts as a purchase
 const BREADTH_T = 1; // a holder is "adding" when its 12-month change is at least +1 t ("reducing": -1 t)
+// The holder whose swings move the headline most: Turkey carries the largest activity weight, and its
+// figure also moves with gold Turkish banks place with the central bank and with swaps at home (−129 t
+// in Mar 2026, rebuilt since). The headline, the pace and the trend show a figure without it beside
+// the full one; the trigger can be read against it.
+const SWING = { code: "TUR", name: "Turkey" };
 const OZ_PER_TONNE = 32150.7466;
 const CONTRACT_T = 100 / OZ_PER_TONNE; // one COMEX gold contract is 100 troy ounces
 const DAY_MS = 86400000;
@@ -64,6 +69,24 @@ const GROUPS = [
   { key: "adv", name: "Advanced economies", cls: "s2" },
 ];
 const groupOf = (code) => (ADVANCED.has(code) ? "adv" : "emd");
+
+// Holders of 20 t or more that are missing from IRFCL, for the coverage notes only (nothing here
+// enters a total): [name, tonnes, month the figure refers to]. Typed in from Trading Economics'
+// gold reserves table, read 2026-11-11; Lebanon's figure there is the oldest. Azerbaijan's is its
+// state oil fund's (SOFAZ), not the central bank's. Venezuela and Iran aren't in that table either.
+const NOT_REPORTING_READ = "2026-11-11";
+const NOT_REPORTING = [
+  ["Uzbekistan", 446, "2026-09"], ["Taiwan", 424, "2026-06"], ["Lebanon", 287, "2025-03"],
+  ["Azerbaijan's oil fund", 178, "2026-09"], ["Iraq", 176, "2026-06"], ["Algeria", 174, "2026-06"],
+  ["Libya", 147, "2026-03"], ["Qatar", 116, "2026-06"], ["Kuwait", 79, "2026-06"],
+  ["the UAE", 74.5, "2026-06"], ["Pakistan", 65, "2026-09"], ["Ghana", 24, "2026-06"],
+];
+// "about 450 t": these come from another compilation and change, so they print rounded.
+const about = (v) => {
+  const step = v >= 1000 ? 100 : v >= 100 ? 10 : v >= 50 ? 5 : 1;
+  return `about ${NF0.format(Math.round(v / step) * step)} t`;
+};
+const notReportingT = () => NOT_REPORTING.reduce((a, x) => a + x[1], 0);
 
 // Fixed context markers for the trend chart. Two more are found in the data (see buildModel).
 const EVENTS = [
@@ -200,28 +223,32 @@ function buildModel(raw) {
 
   const months = new Map();
   for (let i = first + 1; i <= newest; i++) {
-    let net = 0;
+    let net = 0, swing = 0;
     const contrib = [];
     const group = { adv: 0, emd: 0 };
     for (const d of holders) {
       const c = change(d, i);
       if (c === undefined) continue;
       net += c;
+      if (d.code === SWING.code) swing = c;
       group[groupOf(d.code)] += c;
       if (Math.abs(c) >= 0.05) contrib.push({ d, c });
     }
     contrib.sort((a, b) => Math.abs(b.c) - Math.abs(a.c));
     const covered = active.reduce((a, d) => a + (d.s.has(i) ? d.activity : 0), 0);
-    months.set(i, { i, net, group, contrib, coverage: totalActivity ? covered / totalActivity : 1 });
+    months.set(i, { i, net, swing, group, contrib, coverage: totalActivity ? covered / totalActivity : 1 });
   }
   let complete = newest;
   while (complete > first + 12 && months.get(complete).coverage < COVERAGE_MIN) complete--;
 
   const sumNet = (a, b) => { let t = 0; for (let i = a; i <= b; i++) t += months.get(i)?.net ?? 0; return t; };
+  // The same months without SWING's changes: same window, same completeness rule, one holder fewer.
+  const sumSwing = (a, b) => { let t = 0; for (let i = a; i <= b; i++) t += months.get(i)?.swing ?? 0; return t; };
   const rolling12 = [];
   const groupRolling = { adv: [], emd: [] };
   for (let i = first + 12; i <= complete; i++) {
-    rolling12.push({ i, v: sumNet(i - 11, i) });
+    const v = sumNet(i - 11, i);
+    rolling12.push({ i, v, x: v - sumSwing(i - 11, i) });
     for (const g of GROUPS) {
       let t = 0;
       for (let j = i - 11; j <= i; j++) t += months.get(j).group[g.key];
@@ -326,7 +353,8 @@ function buildModel(raw) {
   }
 
   return { raw, holders, newest, first, complete, months, rolling12, groupRolling, win, byCountry, years,
-    worldTotal, marks, breadth, turn: turnIdx >= 0 ? rolling12[turnIdx].i : null, sumNet, valueAt, change };
+    worldTotal, marks, breadth, turn: turnIdx >= 0 ? rolling12[turnIdx].i : null, sumNet, sumSwing, valueAt, change,
+    active: active.length };
 }
 
 /* ---------- The reserves model (US dollars) ---------- */
@@ -544,7 +572,9 @@ const chartH = (height, W) => (typeof height === "function" ? height(W) : height
 
 function lineChart(container, opts) {
   const { points, label, height = 280, endLabel, tipRows, tipTitle = (p) => mLabel(p.i), fmtTick = tickText,
-    cls = "", bands = [], marks = [], rules = [], flags = [], yMax, domain, zero = true } = opts;
+    cls = "", bands = [], marks = [], rules = [], flags = [], yMax, domain, zero = true, alt = null } = opts;
+  // alt: { points, cls }: a second series on the same axis and months (no area, no end label; the
+  // chart's legend and tooltip name it), such as the trend without Turkey.
   mountChart(container, (W, tip) => {
     const narrow = W < 520;
     const H = chartH(height, W);
@@ -553,9 +583,10 @@ function lineChart(container, opts) {
     // domain: a fixed x range, so charts stacked under each other line up month for month.
     const [x0, x1] = domain || [points[0].i, points.at(-1).i];
     const X = (i) => M.l + (x1 === x0 ? pw / 2 : ((i - x0) / (x1 - x0)) * pw);
+    const altPts = alt ? alt.points.filter((p) => p.i >= x0 && p.i <= x1) : [];
     // zero: false lets a level series (a fund's tonnes) fill the height. Fine for a line, which is
     // read by its shape; bars always start at zero.
-    const vs = [...points.map((p) => p.v), ...rules.map((r) => r.v)]; // a reference line must stay in view
+    const vs = [...points.map((p) => p.v), ...(alt ? alt.points.map((p) => p.v) : []), ...rules.map((r) => r.v)]; // a reference line must stay in view
     const nt = ph < 100 ? 2 : narrow ? 4 : 5;
     const yt = zero ? niceTicks(Math.min(0, ...vs), Math.max(0, ...vs, yMax ?? -Infinity), nt)
       : niceTicks(Math.min(...vs), Math.max(...vs), nt);
@@ -578,7 +609,7 @@ function lineChart(container, opts) {
       // so it never lands on the series; with no clear end (a narrow chart) it is left out, and the
       // key under the chart names the line instead.
       const span = Math.min(pw, r.label.length * 6.4 + 10);
-      const gap = (a, b) => Math.min(Infinity, ...points.filter((q) => X(q.i) >= a && X(q.i) <= b).map((q) => Math.abs(Y(q.v) - Y(r.v))));
+      const gap = (a, b) => Math.min(Infinity, ...points.concat(altPts).filter((q) => X(q.i) >= a && X(q.i) <= b).map((q) => Math.abs(Y(q.v) - Y(r.v))));
       const gl = gap(M.l, M.l + span), gr = gap(M.l + pw - span, M.l + pw);
       if (Math.max(gl, gr) < 14) continue;
       const left = gl > gr;
@@ -599,11 +630,14 @@ function lineChart(container, opts) {
         s("text", { x: cx, y: cy + 0.5, class: "marker-num", "text-anchor": "middle", "dominant-baseline": "middle" }, String(mk.n)),
       );
     }
-    const d = points.map((p, k) => `${k ? "L" : "M"}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
-    svg.append(
-      s("path", { d: `${d}L${X(points.at(-1).i).toFixed(1)},${Y(floor)}L${X(points[0].i).toFixed(1)},${Y(floor)}Z`, class: `area ${cls}` }),
-      s("path", { d, class: `line ${cls}` }),
-    );
+    const path = (pts) => pts.map((p, k) => `${k ? "L" : "M"}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+    const d = path(points);
+    svg.append(s("path", { d: `${d}L${X(points.at(-1).i).toFixed(1)},${Y(floor)}L${X(points[0].i).toFixed(1)},${Y(floor)}Z`, class: `area ${cls}` }));
+    if (altPts.length > 1) {
+      svg.append(s("path", { d: path(altPts), class: `line thin ${alt.cls}` }),
+        s("circle", { cx: X(altPts.at(-1).i), cy: Y(altPts.at(-1).v), r: 3.5, class: `dot ${alt.cls}` }));
+    }
+    svg.append(s("path", { d, class: `line ${cls}` }));
     const last = points.at(-1);
     svg.append(s("circle", { cx: X(last.i), cy: Y(last.v), r: 4, class: `dot ${cls}` }));
     // Journal flags: a hollow diamond on the line at the entry's month.
@@ -619,7 +653,9 @@ function lineChart(container, opts) {
     }
     const cross = s("line", { y1: M.t, y2: M.t + ph, class: "cross", visibility: "hidden" });
     const hot = s("circle", { r: 4, class: `dot ${cls}`, visibility: "hidden" });
-    svg.append(cross, hot);
+    const hotAlt = alt ? s("circle", { r: 3.5, class: `dot ${alt.cls}`, visibility: "hidden" }) : null;
+    const altAt = new Map(altPts.map((p) => [p.i, p]));
+    svg.append(cross, ...(hotAlt ? [hotAlt] : []), hot);
     hoverLayer(svg, {
       positions: points.map((p) => X(p.i)),
       show(k) {
@@ -627,11 +663,17 @@ function lineChart(container, opts) {
         cross.setAttribute("x1", x); cross.setAttribute("x2", x);
         hot.setAttribute("cx", x); hot.setAttribute("cy", y);
         cross.setAttribute("visibility", "visible"); hot.setAttribute("visibility", "visible");
+        const q = altAt.get(p.i);
+        if (hotAlt) {
+          hotAlt.setAttribute("visibility", q ? "visible" : "hidden");
+          if (q) { hotAlt.setAttribute("cx", x); hotAlt.setAttribute("cy", Y(q.v)); }
+        }
         fillTip(tip, tipTitle(p), tipRows(p));
-        placeTip(tip, container, x, y);
+        placeTip(tip, container, x, q ? Math.min(y, Y(q.v)) : y);
       },
       hide() {
         cross.setAttribute("visibility", "hidden"); hot.setAttribute("visibility", "hidden");
+        hotAlt?.setAttribute("visibility", "hidden");
         tip.hidden = true;
       },
     });
@@ -948,23 +990,37 @@ function headline(m) {
   const sellers = m.byCountry.filter((x) => x.v < 0).sort((a, b) => a.v - b.v);
   const gross = buyers.reduce((a, x) => a + x.v, 0);
   const top2 = buyers.slice(0, 2);
-  return { c, r12, prev12, r3, pace: r3 * 4, buyers, sellers, top2,
-    share: gross ? top2.reduce((a, x) => a + x.v, 0) / gross : 0 };
+  // x: the same figures without SWING (Turkey), whose swings can move the headline on their own.
+  const x = { r12: r12 - m.sumSwing(c - 11, c), prev12: prev12 - m.sumSwing(c - 23, c - 12), r3: r3 - m.sumSwing(c - 2, c) };
+  x.pace = x.r3 * 4;
+  return { c, r12, prev12, r3, pace: r3 * 4, x, buyers, sellers, top2,
+    share: gross ? top2.reduce((a, y) => a + y.v, 0) / gross : 0 };
 }
 
-// The answer, first: 12-month net reported buying, the gauge's word, and the year before. The trend
-// chart beside it replaces the old sparkline.
+const pillClass = (w) => `pill ${w.icon === "▲" ? "up" : w.icon === "▼" ? "down" : ""}`;
+
+// The answer, first: 12-month net reported buying and the gauge's word, with the pace the word is
+// read from beside it. A small table puts each figure next to the same figure without Turkey, so a
+// reader sees at once whether one holder's swings make the story. The trend chart sits beside it.
 function renderHero(m) {
   const k = headline(m);
-  const d = k.r12 - k.prev12;
-  const word = trendWord(k.r12, k.pace);
+  const word = trendWord(k.r12, k.pace), wordX = trendWord(k.x.r12, k.x.pace);
+  const row = (label, a, b) => h("tr", {}, h("th", { scope: "row" }, label), h("td", {}, a), h("td", {}, b));
   put("hero",
     h("h2", { class: "hero-label", id: "gauge-h" }, `Net reported buying · 12 months to ${mLabel(k.c)}`),
     h("p", { class: "hero-value" }, signed(k.r12)),
     h("p", { class: "hero-word" },
-      h("span", { class: `pill ${word.icon === "▲" ? "up" : word.icon === "▼" ? "down" : ""}` }, `${word.icon} ${word.text}`),
-      h("span", {}, delta(d, signed(d)), ` vs the 12 months before (${signed(k.prev12)})`)),
-    h("p", { class: "hero-asof" }, `${mRange(k.c - 11, k.c)} · ${m.holders.length} holders · IMF IRFCL`));
+      h("span", { class: pillClass(word) }, `${word.icon} ${word.text}`),
+      h("span", {}, `last 3 months at ${signed(k.pace)} a year`),
+      wordX.text !== word.text ? h("span", {}, `without ${SWING.name}: ${wordX.icon} ${wordX.text}`) : null),
+    h("table", { class: "hero-split" },
+      h("caption", { class: "sr-only" }, `Net reported buying with and without ${SWING.name}, tonnes`),
+      h("thead", {}, h("tr", {}, h("td", {}), h("th", { scope: "col" }, "All holders"), h("th", { scope: "col" }, `Without ${SWING.name}`))),
+      h("tbody", {},
+        row(`12 months to ${MONTH_ONLY.format(asDate(k.c))}`, signed(k.r12), signed(k.x.r12)),
+        row("The 12 months before", signed(k.prev12), signed(k.x.prev12)),
+        row("Pace, last 3 months", `${signed(k.pace)}/yr`, `${signed(k.x.pace)}/yr`))),
+    h("p", { class: "hero-asof" }, `${mRange(k.c - 11, k.c)} · ${m.active} active holders · IMF IRFCL`));
 }
 
 function stat(label, value, subs = [], cls = null) {
@@ -1028,9 +1084,9 @@ function renderKpis(m) {
   const k = headline(m);
   const last = m.months.get(k.c);
   put("kpis",
-    stat("Last 3 months", signed(k.r3), [`${mRange(k.c - 2, k.c)} · ${signed(k.pace)} a year at that pace`], tone(k.r3)),
+    stat("Last 3 months", signed(k.r3), [`${mRange(k.c - 2, k.c)} · ${SWING.name} ${signed(k.r3 - k.x.r3)} of it`], tone(k.r3)),
     stat("Latest complete month", signed(last.net), [`${mLabel(k.c)} · ${last.contrib.slice(0, 2).map(({ d, c }) => `${d.name} ${signed(c)}`).join(", ")}`], tone(last.net)),
-    triggerStat(k),
+    triggerStat(m),
     stat("Top two buyers' share", pct(k.share), [`of gross reported buying: ${k.top2.map((x) => x.d.name).join(" and ")}`,
       h("div", { class: "meter", role: "img", "aria-label": `${pct(k.share)} share` }, h("span", { style: `width:${(k.share * 100).toFixed(1)}%` }))]),
     breadthStat(m));
@@ -1040,17 +1096,24 @@ function renderRolling(m, r, years = 0) {
   const all = m.rolling12;
   const pts12 = years ? all.filter((p) => p.i > all.at(-1).i - years * 12) : all;
   renderTrendPrice(m, r, pts12[0].i, pts12.at(-1).i);
+  const rule = triggerRule();
+  const without = `Without ${SWING.name}`;
+  put("trend-legend", h("span", {}, h("i", { "aria-hidden": "true" }), "All holders"),
+    h("span", {}, h("i", { class: "s2", "aria-hidden": "true" }), without));
   lineChart($("chart-rolling"), {
     points: pts12,
-    height: (W) => (W >= 640 ? 330 : 230),
-    label: `Line chart of 12-month net reported central bank gold buying, ${mLabel(pts12[0].i)} to ${mLabel(pts12.at(-1).i)}. Latest ${signed(pts12.at(-1).v)}.`,
+    alt: { points: pts12.map((p) => ({ i: p.i, v: p.x })), cls: "s2" },
+    // Beside the gauge (1,100 px and up) the row is as tall as the gauge card anyway: the chart takes it.
+    height: (W) => (W < 640 ? 230 : matchMedia("(min-width: 1100px)").matches ? 400 : 330),
+    label: `Line chart of 12-month net reported central bank gold buying, ${mLabel(pts12[0].i)} to ${mLabel(pts12.at(-1).i)}, all holders and without ${SWING.name}. Latest ${signed(pts12.at(-1).v)}, ${signed(pts12.at(-1).x)} without ${SWING.name}.`,
     endLabel: (p) => signed(p.v),
     bands: m.turn ? [{ from: pts12[0].i, to: m.turn, label: "Net selling, led by European central banks" }] : [],
     marks: m.marks,
-    rules: Number.isFinite(JOURNAL?.trigger?.t) ? [{ v: JOURNAL.trigger.t, label: `Your trigger ${signed(JOURNAL.trigger.t)}` }] : [],
+    rules: rule ? [{ v: rule.t, label: `Your trigger ${signed(rule.t)}` }] : [],
     flags: journalEntries(),
     tipRows: (p) => [
       { value: signed(p.v), label: "12-month net", key: "line" },
+      { value: signed(p.x), label: `without ${SWING.name}`, key: "s2" },
       { value: signed(m.months.get(p.i).net), label: "that month" },
       ...journalEntries().filter((e) => e.i === p.i).flatMap((e) => ["sep", { value: "◆", label: e.text, note: true }]),
     ],
@@ -1058,12 +1121,13 @@ function renderRolling(m, r, years = 0) {
   const shown = m.marks.filter((mk) => mk.i >= pts12[0].i);
   const flagged = journalEntries().filter((e) => e.i >= pts12[0].i && e.i <= pts12.at(-1).i).length;
   put("marks-key", shown.map((mk) => h("li", {}, h("span", { class: "n", "aria-hidden": "true" }, String(mk.n)), h("span", {}, mk.text))),
-    Number.isFinite(JOURNAL?.trigger?.t) ? h("li", {}, h("span", { class: "n key-rule", "aria-hidden": "true" }), h("span", {},
-      `Dashed line: your trigger, ${signed(JOURNAL.trigger.t)} over 12 months`, flagged ? `; ◆ ${plural(flagged, "journal entry", "journal entries")}` : "", " (", h("a", { href: "#journal" }, "Journal"), ").")) : null);
+    rule ? h("li", {}, h("span", { class: "n key-rule", "aria-hidden": "true" }), h("span", {},
+      `Dashed line: your trigger, ${signed(rule.t)} over 12 months, read against the ${rule.ex ? `line without ${SWING.name}` : "line for all holders"}`,
+      rule.months > 1 ? ` for ${rule.months} months in a row` : "", flagged ? `; ◆ ${plural(flagged, "journal entry", "journal entries")}` : "", " (", h("a", { href: "#journal" }, "Journal"), ").")) : null);
   const yearly = all.filter((p) => p.i % 12 === 11 || p.i === all.at(-1).i).reverse();
   $("table-rolling").replaceChildren(tableDetails("Show as a table",
-    table("12-month net reported buying, at each December and the latest month", ["Month", "12-month net"],
-      yearly.map((p) => [mLabel(p.i), sv(p.v)]), { scroll: true })));
+    table("12-month net reported buying, at each December and the latest month", ["Month", "12-month net", without],
+      yearly.map((p) => [mLabel(p.i), sv(p.v), sv(p.x)]), { scroll: true })));
 }
 
 // The implied gold price under the trend, over exactly the same months, so the two read as one
@@ -1078,11 +1142,11 @@ function renderTrendPrice(m, r, x0, x1) {
     points: pp,
     domain: [x0, x1],
     height: (W) => (W >= 640 ? 110 : 90),
-    cls: "s2",
+    cls: "ink", // neutral: amber is the trend's "without Turkey" line right above
     fmtTick: usdTick,
     endLabel: (p) => usd(p.v),
     label: `Line chart of the gold price implied by IMF data, ${mLabel(pp[0].i)} to ${mLabel(pp.at(-1).i)}, on the same months as the trend above.`,
-    tipRows: (p) => [{ value: usd(p.v), label: "per ounce", key: "s2" }, { value: String(p.n), label: "holders in the median" },
+    tipRows: (p) => [{ value: usd(p.v), label: "per ounce", key: "ink" }, { value: String(p.n), label: "holders in the median" },
       ...(r12.has(p.i) ? [{ value: signed(r12.get(p.i)), label: "12-month net buying", key: "line" }] : [])],
   });
 }
@@ -1423,7 +1487,10 @@ function renderMix(m, r) {
 function renderBoard(m, r, select) {
   const top = m.holders.slice().sort((a, b) => b.latest - a.latest).slice(0, TOP_N);
   const total = m.holders.filter((d) => !d.stale).reduce((a, d) => a + d.latest, 0);
-  $("board-sub").textContent = `12 months to ${mLabel(m.complete)}, the last complete month; "Since then" adds what each holder filed after it. Uzbekistan, a large holder, doesn't report to the IMF.`;
+  const [u1, u2] = NOT_REPORTING;
+  $("board-sub").replaceChildren(`12 months to ${mLabel(m.complete)}, the last complete month; "Since then" adds what each holder filed after it. `
+    + `Not in the IMF data: ${NOT_REPORTING.length} holders with ${about(notReportingT())} between them, the largest ${u1[0]} (${about(u1[1])}) and ${u2[0]} (${about(u2[1])}); `,
+    h("a", { href: "#method" }, "Method"), " lists them.");
   const id = "board-caption";
   // The two change columns come straight after the name: on a phone only the first few columns fit.
   // The window header breaks onto two lines so both change columns fit a phone (the space before
@@ -1556,19 +1623,33 @@ function renderNotes(m, r) {
   for (let i = m.complete + 1; i <= m.newest; i++) pending.push(`${mLabel(i)}: ${pct(m.months.get(i).coverage)} reported`);
   const stale = m.holders.filter((d) => d.stale).sort((a, b) => b.latest - a.latest);
   const rejected = Object.entries(m.raw.rejected || {});
+  const repaired = Object.entries(m.raw.repaired || {});
   const revalued = r ? r.list.filter((x) => x.revalued).sort((a, b) => b.latest.goldMkt - a.latest.goldMkt) : [];
   const priceNote = priceLinkText(m, r);
+  const active = m.holders.filter((d) => !d.stale);
+  const totalA = active.reduce((a, d) => a + d.activity, 0);
+  const sw = m.holders.find((d) => d.code === SWING.code);
+  const swRank = sw ? active.slice().sort((a, b) => b.activity - a.activity).indexOf(sw) + 1 : 0;
+  const k = headline(m);
+  const world = m.worldTotal.get(m.newest) || 0, missing = notReportingT();
   put("notes",
     topic("When a month counts",
       h("p", {}, `Countries report on different schedules: most file a month or two after it ends, some (the US among them) take longer. A month enters the totals once the holders responsible for ${pct(COVERAGE_MIN)} of the past year's reported buying and selling have filed it. Weighting by activity, not by size, means a large holder that never changes (such as the US) can't hold the totals back, while a busy trader (such as Turkey) can.`),
       pending.length ? h("p", {}, `Not counted yet: ${pending.join("; ")}.`) : null),
+    topic(`Without ${SWING.name}`,
+      h("p", {}, `${SWING.name}'s reported gold swings more than anyone's${sw && totalA ? ` (${pct(sw.activity / totalA)} of all reported buying and selling over the past year${swRank === 1 ? ", the most of any holder" : ""})` : ""}, and its figure also moves with gold that Turkish banks place with the central bank and with swaps at home, not only with purchases and sales${sw?.maxSell ? ` (its biggest one-month fall: ${signed(sw.maxSell.c)} in ${mLabel(sw.maxSell.i)})` : ""}. One holder can then move the headline on its own, so the gauge, the pace and the trend also show the same months without ${SWING.name}'s changes. Same window, same rule for when a month counts; only ${SWING.name}'s monthly changes are taken out.`),
+      h("p", {}, `12 months to ${mLabel(k.c)}: ${signed(k.r12)} with ${SWING.name}, ${signed(k.x.r12)} without (${signed(k.prev12)} and ${signed(k.x.prev12)} the 12 months before). Last 3 months at a year's pace: ${signed(k.pace)} with, ${signed(k.x.pace)} without.`)),
     topic("What is covered",
-      h("p", {}, `IMF IRFCL line 56, gold volume, for monetary authorities plus central government, so gold held by a finance ministry (the UK's Treasury, for example) counts. ${m.holders.length} holders, ${mLabel(m.first)} to ${mLabel(m.newest)}. The euro-area total is left out because its members and the ECB are already counted. Uzbekistan does not report to IRFCL.`),
+      h("p", {}, `IMF IRFCL line 56, gold volume, for monetary authorities plus central government, so gold held by a finance ministry (the UK's Treasury, for example) counts. ${m.holders.length} holders, ${m.active} of them active (a filing in the last ${STALE_MONTHS} months), ${mLabel(m.first)} to ${mLabel(m.newest)}. The euro-area total is left out because its members and the ECB are already counted.`),
+      h("p", {}, `Not in IRFCL, so not in any figure here: ${NOT_REPORTING.map(([n, t, k2]) => `${n} (${about(t)}, ${mLabel(idx(k2))})`).join(", ")}. Together ${about(missing)}${world ? `: added to the IMF's reporters, about ${pct(missing / (world + missing))} of the total` : ""}. Sizes as compiled by `,
+        h("a", { href: "https://tradingeconomics.com/country-list/gold-reserves" }, "Trading Economics"), `, read ${DAY.format(dayOf(NOT_REPORTING_READ))}, each with the month it refers to; Azerbaijan's is its state oil fund's, which wouldn't count as official reserves anyway. Venezuela and Iran have no figure there.`),
       stale.length ? h("p", {}, `No report in the last ${STALE_MONTHS} months, shown at their last figure: ${stale.map((d) => `${d.name} (${mLabel(d.last)})`).join(", ")}.`) : null),
-    topic("Removed as reporting errors",
-      h("p", {}, "The fetch scripts drop values that can only be mistakes in national submissions: more gold than anyone holds, a jump of exactly ×1,000, or a single month far off two neighbours that agree. A change can span up to three missing months, so a dropped value doesn't hide the move around it."),
+    topic("Repaired and removed reporting errors",
+      h("p", {}, "A figure exactly 1,000 (or 1,000,000) times the holder's previous one is a unit slip, such as kilograms sent as tonnes: the fetch script divides it back and keeps it, and lists it here as repaired. It drops values that can only be mistakes: more gold than anyone holds; gold worth more than all of the holder's reserves at the market price (unless the holder's own valuation explains it, as the US's $42.22 an ounce does); or a single month far off two neighbours that agree. A change can span up to three missing months, so a dropped value doesn't hide the move around it."),
+      repaired.length ? h("ul", {}, repaired.map(([code, items]) =>
+        h("li", {}, `${nameOf(code)}: ${plural(items.length, "month")} (${monthList(items.map((x) => x[0]))}) repaired, reported as ${NF0.format(items[0][1])} t, used as ${NF1.format(items[0][2])} t`))) : null,
       rejected.length ? h("ul", {}, rejected.map(([code, items]) =>
-        h("li", {}, `${nameOf(code)}: ${plural(items.length, "month")} (${monthList(items.map((x) => x[0]))}), ${[...new Set(items.map((x) => x[2].split(" (")[0].split(" from ")[0]))].join("; ")}`))) : null),
+        h("li", {}, `${nameOf(code)}: ${plural(items.length, "month")} (${monthList(items.map((x) => x[0]))}) removed, ${[...new Set(items.map((x) => x[2].split(" (")[0].split(" from ")[0]))].join("; ")}`))) : null),
     topic("Groups and momentum",
       h("p", {}, "Advanced economies follow the IMF World Economic Outlook list, with the ECB counted as advanced; every other holder is emerging or developing."),
       h("p", {}, `A purchase is a month with an increase of at least ${BUY_T} t. “Started buying again” means a purchase in a holder's last 6 reported months after none in the 12 before; “stopped” means none in the last 6 after at least 3 in the 12 before.`),
@@ -1584,16 +1665,16 @@ function renderNotes(m, r) {
       revalued.length ? h("p", {}, `Holders whose own value is more than 10% off that price, mostly because they use an old official price or historical cost: ${revalued.map((x) => x.name).join(", ")}. The US, for example, values its gold at the statutory $42.22 an ounce.`) : null,
       r ? h("p", {}, `The world line starts in ${mLabel(r.worldSeries[0].i)}, when today's reporters first cover ${pct(COVERAGE_MIN)} of reserves, and ends at ${mLabel(r.complete)}, the latest month that is ${pct(COVERAGE_MIN)} reported.`) : null),
     topic("Your trigger and journal",
-      h("p", {}, "data/journal.json is the owner's file: a trigger level (12-month net reported buying, in tonnes) and dated notes. The trend chart draws the level as a dashed line and each note as a diamond in its month; the Journal section lists the notes with the gauge as it read then and the periods when the gauge was below the line. Edit the file on GitHub to change either.")),
+      h("p", {}, `data/journal.json is the owner's file: a trigger level (12-month net reported buying, in tonnes) and dated notes. Two settings say how the level is read: "basis" against which figure ("without ${SWING.name}", or "all holders"), and "months" how many complete months in a row below the line count as crossing it. Either keeps one holder's one-month swing from tripping the line: in March 2026 ${SWING.name} alone took the 12-month net below +160 t for a single month. The trend chart draws the level as a dashed line and each note as a diamond in its month; the Journal section lists the notes with the gauge as it read then and the periods below the line. Edit the file on GitHub to change any of it.`)),
     priceNote ? topic("Buying and the price", h("p", {}, priceNote)) : null,
     topic("Revisions and who is late",
       h("p", {}, "Every figure that first appeared in data/changes.json is compared with the figure the IMF shows for that holder and month now; a difference of 0.05 t or more, or a withdrawn figure, counts as a revision. The delay a holder's figures usually take is the median gap between a month's end and the day its figure first arrived, so it needs a few filings per holder before it shows. “Filers needed” adds the missing holders in order of activity weight until the next month would reach 90%.")),
     topic("Treasuries and reserve currencies",
-      h("p", {}, "Foreign official holdings of US Treasuries come from the US Treasury's TIC “Major Foreign Holders” tables (monthly, US$ billions, attributed to the custodian's country, so Belgium and Luxembourg stand in for others). Reserve currency shares come from the IMF's COFER: the share of foreign exchange reserves whose currency is reported, so gold is not in them. A monthly job fetches both (scripts: spike/fetch_tic.py, spike/fetch_cofer.py; logs: data/fetch_log_tic.csv, data/fetch_log_cofer.csv), separate from the daily gold job.")),
+      h("p", {}, "Foreign official holdings of US Treasuries come from the US Treasury's TIC “Major Foreign Holders” tables (monthly, US$ billions, attributed to the custodian's country, so Belgium and Luxembourg stand in for others). Treasury bonds and notes are counted at market value (bills at face value), so the total falls when bond prices fall, with no selling at all. Gold added over the same months is shown in tonnes and in dollars, each month's net change at that month's implied price. Reserve currency shares come from the IMF's COFER: the share of foreign exchange reserves whose currency is reported, so gold is not in them. A monthly job fetches both (scripts: spike/fetch_tic.py, spike/fetch_cofer.py; logs: data/fetch_log_tic.csv, data/fetch_log_cofer.csv), separate from the daily gold job.")),
     topic("Reported against the World Gold Council's estimate",
-      h("p", {}, "The WGC's Gold Demand Trends estimates total central bank buying each quarter, including purchases not reported by any country, from its own research and trade data. Its figures are typed into data/wgc_central_banks.json by hand from the report pages, each the latest revision found there. “Reported” is this page's sum of monthly net changes over the quarter; the undisclosed share is one minus reported over estimated.")),
+      h("p", {}, "The WGC's Gold Demand Trends estimates total central bank buying each quarter, including purchases not reported by any country, from its own research and trade data. Its figures are typed into data/wgc_central_banks.json by hand from the report pages, each the latest revision found there. “Reported” is this page's sum of monthly net changes over the quarter; the undisclosed share is this page's comparison, one minus reported over estimated, not a WGC figure. It is left as a dash when reported buying is negative or above the estimate (Turkey's sales made a quarter negative; 2017's filings beat the estimate), and it takes in anything the two count differently, Turkey's swings included.")),
     topic("Reading the gauge",
-      h("p", {}, "“Speeding up” compares the last three months, scaled to a year, with the 12-month total; within 15% of it (or within 20 t, when the total is small) counts as steady. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars.")),
+      h("p", {}, `“Speeding up” compares the last three months, scaled to a year (the pace beside the word), with the 12-month total; within 15% of it (or within 20 t, when the total is small) counts as steady. The table under it gives each figure without ${SWING.name} too; if the word would differ without ${SWING.name}, the line says so. Gold amounts are in tonnes (1 t ≈ 32,151 fine troy ounces), money in US dollars.`)),
   );
   foldSummary("method", `${$("notes").children.length} topics, from when a month counts to reading the gauge; sources, scripts and run logs`);
 }
@@ -1682,9 +1763,29 @@ function renderUpdates(changes) {
         [shown.length > top.length ? `${plural(shown.length - top.length, "more change")}` : null,
           quiet ? `${plural(quiet, "new figure")} with no change` : null].filter(Boolean).join(" · ")) : null);
   };
-  const recent = list.slice(0, 4), older = list.slice(4);
-  put("updates-list", h("div", { class: "split updates" }, recent.map(card)),
-    older.length ? h("details", { class: "data-table" }, h("summary", {}, `Older updates (${older.length})`), h("div", { class: "split updates" }, older.map(card))) : null);
+  // A day on which nothing moved (every new figure equal to the holder's last, nothing revised or
+  // withdrawn, the gauge as it was) says the same thing as the next such day: a run of them is one line.
+  const quiet = (e) => e.items.every((x) => x.kind === "new" && has(x.move) && Math.abs(x.move) < 0.05)
+    && e.gauge?.after && e.gauge?.before && e.gauge.after.complete === e.gauge.before.complete
+    && e.gauge.after.word === e.gauge.before.word && Math.abs(e.gauge.after.r12 - e.gauge.before.r12) < 0.05;
+  const groups = [];
+  for (const e of list) {
+    const g = groups.at(-1);
+    if (quiet(e) && g?.quiet) g.entries.push(e); else groups.push({ quiet: quiet(e), entries: [e] });
+  }
+  const quietCard = (g) => {
+    const es = g.entries, a = es[0].gauge.after; // newest first
+    const names = [...new Set(es.flatMap((e) => e.items.map((x) => nameOf(x.code))))];
+    const when = es.length === 1 ? dayStr(es[0]) : `${dayStr(es.at(-1))} – ${dayStr(es[0])}`;
+    const who = names.length > 4 ? `${names.slice(0, 4).join(", ")} and ${names.length - 4} more` : names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+    return h("article", { class: "list-card update quiet" },
+      h("h3", {}, when),
+      h("p", { class: "update-gauge" }, `${es.length === 1 ? "Nothing moved" : `${plural(es.length, "update")}, nothing moved`}: ${who} filed the same figure as before. 12-month net unchanged at `, sv(a.r12), ` · ${a.word}`));
+  };
+  const cards = groups.map((g) => (g.quiet ? quietCard(g) : card(g.entries[0])));
+  const recent = cards.slice(0, 4), older = cards.slice(4);
+  put("updates-list", h("div", { class: "split updates" }, recent),
+    older.length ? h("details", { class: "data-table" }, h("summary", {}, `Older updates (${older.length})`), h("div", { class: "split updates" }, older)) : null);
 }
 
 /* ---------- Compare holders ---------- */
@@ -2157,55 +2258,87 @@ const journalEntries = () => (JOURNAL?.entries || []).filter((e) => /^\d{4}-\d{2
 // the page says so wherever the level appears, so a starting value isn't read as a decision.
 const triggerIsPlaceholder = () => JOURNAL?.trigger?.placeholder === true;
 
-function triggerStat(k) {
-  const t = JOURNAL?.trigger?.t;
-  if (!Number.isFinite(t)) return null;
-  const gap = k.r12 - t;
-  return stat(triggerIsPlaceholder() ? "Your trigger · placeholder" : "Your trigger", signed(t), [
-    gap >= 0 ? h("span", { class: "pos" }, `▲ ${tonnes(gap)} above it`) : h("span", { class: "neg" }, `▼ ${tonnes(-gap)} below it: re-read your case`),
+// How the trigger is read, from journal.json: trigger.basis "without Turkey" reads it against the
+// 12-month net without SWING (anything else, or no basis, against all holders), and trigger.months is
+// how many complete months in a row below the line count as crossing it (default 1). Turkey alone
+// took the 12-month net to +155 t in Mar 2026, below a +160 t line, for one month (+230 t without it).
+function triggerRule() {
+  const tr = JOURNAL?.trigger;
+  if (!Number.isFinite(tr?.t)) return null;
+  const ex = String(tr.basis || "").trim().toLowerCase() === `without ${SWING.name.toLowerCase()}`;
+  const months = Number.isInteger(tr.months) && tr.months >= 1 ? tr.months : 1;
+  return { t: tr.t, ex, months, basis: ex ? `without ${SWING.name}` : "all holders" };
+}
+
+// The trigger's series and its runs below the line, oldest first. A run counts as a crossing once it
+// lasts rule.months; `cur` is the run the latest month is in, if any.
+function triggerRuns(m, rule) {
+  const pts = m.rolling12.map((p) => ({ i: p.i, v: rule.ex ? p.x : p.v }));
+  const runs = [];
+  for (const p of pts) {
+    if (p.v >= rule.t) continue;
+    const last = runs.at(-1);
+    if (last && last.to === p.i - 1) { last.to = p.i; if (p.v < last.low.v) last.low = p; } else runs.push({ from: p.i, to: p.i, low: p });
+  }
+  for (const x of runs) { x.n = x.to - x.from + 1; x.counts = x.n >= rule.months; }
+  const now = pts.at(-1);
+  const cur = runs.length && runs.at(-1).to === now.i ? runs.at(-1) : null;
+  return { pts, runs, now, cur };
+}
+
+function triggerStat(m) {
+  const rule = triggerRule();
+  if (!rule) return null;
+  const { now, cur } = triggerRuns(m, rule);
+  const gap = now.v - rule.t;
+  const state = !cur ? h("span", { class: "pos" }, `▲ ${tonnes(gap)} above it`)
+    : cur.counts ? h("span", { class: "neg" }, `▼ ${tonnes(-gap)} below it since ${mLabel(cur.from)}: re-read your case`)
+    : h("span", { class: "neg" }, `▼ below it ${cur.n} of the ${rule.months} months that count`);
+  return stat(triggerIsPlaceholder() ? "Your trigger · placeholder" : "Your trigger", signed(rule.t), [
+    [state, ` · read ${rule.basis} (${signed(now.v)})${rule.months > 1 ? `, ${rule.months} months in a row` : ""}`],
     h("a", { href: "#journal" }, triggerIsPlaceholder() ? "Set your own level" : "Journal and trigger"),
   ]);
 }
 
 function renderJournal(m, j) {
   const sec = $("journal");
-  if (!j || !Number.isFinite(j.trigger?.t)) { sec.hidden = true; return; }
-  const t = j.trigger.t, k = headline(m), all = m.rolling12, now = all.at(-1);
-  // Runs of months below the line, oldest first.
-  const runs = [];
-  for (const p of all) {
-    if (p.v >= t) continue;
-    const last = runs.at(-1);
-    if (last && last.to === p.i - 1) { last.to = p.i; if (p.v < last.low.v) last.low = p; } else runs.push({ from: p.i, to: p.i, low: p });
-  }
-  const cur = runs.length && runs.at(-1).to === now.i ? runs.at(-1) : null;
+  const rule = triggerRule();
+  if (!j || !rule) { sec.hidden = true; return; }
+  const t = rule.t;
+  const { pts: all, runs, now, cur } = triggerRuns(m, rule);
   const lastRun = cur ? runs.at(-2) : runs.at(-1);
   const since = m.turn ?? all[0].i;
   const recent = all.filter((p) => p.i >= since);
   const belowRecent = recent.filter((p) => p.v < t).length;
-  $("journal-sub").textContent = `Your line: ${signed(t)} of 12-month net reported buying${j.trigger.set ? `, set ${DAY.format(dayOf(j.trigger.set))}` : ""}${triggerIsPlaceholder() ? " (a placeholder)" : ""}. ${j.trigger.why || ""}`;
+  const basis = `12-month net reported buying, ${rule.basis}`;
+  const counting = rule.months > 1 ? `; ${rule.months} complete months in a row below it count as crossing it` : "";
+  $("journal-sub").textContent = `Your line: ${signed(t)} of ${basis}${counting}${j.trigger.set ? `, set ${DAY.format(dayOf(j.trigger.set))}` : ""}${triggerIsPlaceholder() ? " (a placeholder)" : ""}. ${j.trigger.why || ""}`;
+  const nowText = !cur ? `${tonnes(now.v - t)} above the line`
+    : cur.counts ? `below the line since ${mLabel(cur.from)}` : `below it ${cur.n} of the ${rule.months} months that count`;
   put("journal-stats",
-    dstat("Your trigger", signed(t), triggerIsPlaceholder() ? "placeholder · 12-month net reported buying" : "12-month net reported buying"),
-    dstat("Gauge now", signed(k.r12), cur ? `below the line since ${mLabel(cur.from)}` : `${tonnes(k.r12 - t)} above the line`),
-    dstat("Last time below", lastRun ? (lastRun.from === lastRun.to ? mLabel(lastRun.from) : mRange(lastRun.from, lastRun.to)) : "never", lastRun ? `${plural(lastRun.to - lastRun.from + 1, "month")}, low ${signed(lastRun.low.v)}` : `since ${mLabel(all[0].i)}`),
+    dstat("Your trigger", signed(t), `${triggerIsPlaceholder() ? "placeholder · " : ""}${basis}`),
+    dstat("Gauge now", signed(now.v), `${rule.ex ? `without ${SWING.name} · ` : ""}${nowText}`),
+    dstat("Last time below", lastRun ? (lastRun.from === lastRun.to ? mLabel(lastRun.from) : mRange(lastRun.from, lastRun.to)) : "never", lastRun ? `${plural(lastRun.n, "month")}, low ${signed(lastRun.low.v)}${lastRun.counts ? "" : ", too short to count"}` : `since ${mLabel(all[0].i)}`),
     dstat("Months below the line", `${belowRecent} of ${recent.length}`, `since ${mLabel(since)}`));
-  const r12 = new Map(all.map((p) => [p.i, p.v]));
+  const r12 = new Map(m.rolling12.map((p) => [p.i, p]));
   const entries = journalEntries().reverse();
-  foldSummary("journal", `Trigger ${signed(t)}${triggerIsPlaceholder() ? " (placeholder)" : ""}, `,
-    cur ? h("span", { class: "neg" }, `▼ below it since ${mLabel(cur.from)}`) : h("span", { class: "pos" }, `▲ ${tonnes(k.r12 - t)} above`),
+  foldSummary("journal", `Trigger ${signed(t)}${triggerIsPlaceholder() ? " (placeholder)" : ""}, read ${rule.basis}: `,
+    cur ? h("span", { class: "neg" }, `▼ ${nowText}`) : h("span", { class: "pos" }, `▲ ${tonnes(now.v - t)} above`),
     ` · ${plural(entries.length, "entry", "entries")}`);
   put("journal-list", entries.length ? h("ul", { class: "journal" }, entries.map((e) => {
     const at = Math.min(e.i, m.complete); // the gauge as the data reads now, at the latest complete month then
     return h("li", {},
-      h("p", { class: "journal-when" }, DAY.format(dayOf(e.date)), r12.has(at) ? h("span", { class: "muted" }, ` · 12-month net to ${mLabel(at)}: ${signed(r12.get(at))}`) : null),
+      h("p", { class: "journal-when" }, DAY.format(dayOf(e.date)), r12.has(at) ? h("span", { class: "muted" }, ` · 12-month net to ${mLabel(at)}: ${signed(r12.get(at).v)} (${signed(r12.get(at).x)} without ${SWING.name})`) : null),
       h("p", {}, e.text));
   })) : h("p", { class: "chart-note" }, "No entries yet."));
   $("journal-note").replaceChildren("To change the trigger or add an entry, edit ", h("a", { href: JOURNAL_EDIT }, "data/journal.json"),
-    " on GitHub: a date and a sentence per entry. ",
+    ` on GitHub: a date and a sentence per entry. "basis" picks the figure the line is read against ("without ${SWING.name}" or "all holders"), "months" how many months in a row below it count. `,
     triggerIsPlaceholder() ? "Once you set your own level, delete its line \"placeholder\": true." : null);
+  const cols = ["From", "To", "Months", "Lowest", ...(rule.months > 1 ? ["Counts"] : [])];
   put("table-journal", runs.length ? tableDetails("Show the periods below the line as a table",
-    table(`Periods when the 12-month net was below your trigger (${signed(t)})`, ["From", "To", "Months", "Lowest"],
-      runs.slice().reverse().map((x) => [mLabel(x.from), x.to === now.i ? `${mLabel(x.to)} (now)` : mLabel(x.to), count(x.to - x.from + 1), sv(x.low.v)]))) : null);
+    table(`Periods when the 12-month net ${rule.basis} was below your trigger (${signed(t)})`, cols,
+      runs.slice().reverse().map((x) => [mLabel(x.from), x.to === now.i ? `${mLabel(x.to)} (now)` : mLabel(x.to), count(x.n), sv(x.low.v),
+        ...(rule.months > 1 ? [x.counts ? "yes" : "too short"] : [])]))) : null);
 }
 
 /* ---------- Buying and the price (one finding, told in Method) ---------- */
@@ -2361,7 +2494,22 @@ function renderDollar(m, r, tic, cofer) {
   const cq = (cofer?.quarters || []).filter((x) => Number.isFinite(x[1]?.USD)).map(([q, d]) => ({ q, i: qIdx(q), ...d }));
   if (tm.length < 24 && cq.length < 8) { sec.hidden = true; return; }
   const stats = [];
-  const goldOver = (from, to) => (to <= m.complete && from >= m.first ? signed(m.sumNet(from, to)) : null);
+  // Gold reported over the same months, in tonnes and in dollars: each month's net change at that
+  // month's implied price, so it reads against a dollar figure like the Treasury holdings.
+  const priceAt = new Map((r?.price || []).map((p) => [p.i, p.v]));
+  const goldBn = (from, to) => {
+    let v = 0;
+    for (let i = from; i <= to; i++) {
+      if (!priceAt.has(i)) return null;
+      v += (m.months.get(i)?.net ?? 0) * OZ_PER_TONNE * priceAt.get(i) / 1e9;
+    }
+    return v;
+  };
+  const goldOver = (from, to) => {
+    if (to > m.complete || from < m.first) return null;
+    const usdV = goldBn(from, to);
+    return `${signed(m.sumNet(from, to))}${usdV === null ? "" : ` (${signedBn(usdV)})`}`;
+  };
   if (tm.length >= 24) {
     const last = tm.at(-1), ago = tm.find((p) => p.i === last.i - 12), peak = tm.reduce((a, p) => (p.v >= a.v ? p : a), tm[0]);
     const freeze = tm.find((p) => p.i === idx("2022-02"));
@@ -2370,9 +2518,9 @@ function renderDollar(m, r, tic, cofer) {
     // The peak is in the chart's caption below, so it takes no tile of its own.
     stats.push(dstat("US Treasuries, foreign official", bn(last.v), `${mLabel(last.i)} · ${pct(last.v / last.tot)} of all foreign-held`),
       d12 !== null ? dstat("12 months", h("span", { class: tone(d12, 0.5) }, `${arrow(d12, 0.5)} ${signedBn(d12)}`), g12 ? `gold reported ${g12} over the same months` : null) : null,
-      freeze ? dstat("Since Feb 2022", h("span", { class: tone(last.v - freeze.v, 0.5) }, `${arrow(last.v - freeze.v, 0.5)} ${signedBn(last.v - freeze.v)}`), `Russia's reserves frozen${gFreeze ? `; gold reported ${gFreeze}` : ""}`) : null);
+      freeze ? dstat("Since Feb 2022", h("span", { class: tone(last.v - freeze.v, 0.5) }, `${arrow(last.v - freeze.v, 0.5)} ${signedBn(last.v - freeze.v)}`), `at market value, so partly lower bond prices${gFreeze ? `; gold reported ${gFreeze}` : ""}`) : null);
     $("treasuries-sub").textContent = `What foreign central banks, finance ministries and sovereign funds hold in US Treasury securities, ${mLabel(tm[0].i)} to ${mLabel(last.i)} (US Treasury TIC data, attributed by custodian country). `
-      + `Peak ${bn(peak.v)} in ${mLabel(peak.i)}; ${bn(last.v)} now. Flat holdings while US debt grew mean a shrinking share of it; over the same years reported gold rose.`;
+      + `Peak ${bn(peak.v)} in ${mLabel(peak.i)}; ${bn(last.v)} now. TIC counts Treasury bonds and notes at market value, so part of the fall since Russia's reserves were frozen in Feb 2022 is the 2022 drop in bond prices, not selling. Gold reported over the same months is in tonnes and, at each month's price, in dollars.`;
     lineChart($("chart-treasuries"), {
       points: tm, height: 240, fmtTick: bnTick, endLabel: (p) => bn(p.v),
       label: `Line chart of foreign official holdings of US Treasury securities, ${mLabel(tm[0].i)} to ${mLabel(last.i)}. Latest ${bn(last.v)}.`,
@@ -2387,6 +2535,8 @@ function renderDollar(m, r, tic, cofer) {
         ...(goldOver(b.i - 11, b.i) ? [{ value: goldOver(b.i - 11, b.i), label: "gold reported, same 12 months" }] : [])],
     });
   } else $("treasuries-block").hidden = true;
+  // The table's gold column keeps tonnes only; its dollars are in the tiles and the tooltips.
+  const goldT = (from, to) => (to <= m.complete && from >= m.first ? signed(m.sumNet(from, to)) : null);
   if (cq.length >= 8) {
     const last = cq.at(-1), first = cq[0];
     // One quarter-on-year move is noise beside the 27-year one, so only the long view gets a tile.
@@ -2425,7 +2575,7 @@ function renderDollar(m, r, tic, cofer) {
   const rows = years.map((y) => {
     const t = tm.findLast((p) => yearOf(p.i) === y), c = cq.findLast((p) => yearOf(p.i) === y);
     return [String(y), t ? `${MONTH_ONLY.format(asDate(t.i))}: ${bn(t.v)}` : "–", t && byI.has(t.i - 12) ? signedBn(t.v - byI.get(t.i - 12)) : "–",
-      c ? pct1(c.USD / 100) : "–", c ? pct1(c.EUR / 100) : "–", c && c.CNY != null ? pct1(c.CNY / 100) : "–", (t && goldOver(t.i - 11, t.i)) || "–"];
+      c ? pct1(c.USD / 100) : "–", c ? pct1(c.EUR / 100) : "–", c && c.CNY != null ? pct1(c.CNY / 100) : "–", (t && goldT(t.i - 11, t.i)) || "–"];
   });
   $("table-dollar").replaceChildren(tableDetails("Show year ends as a table",
     table("Foreign official US Treasury holdings, reserve currency shares and reported gold buying, at each year's latest figure",
@@ -2445,12 +2595,17 @@ function renderUnreported(m, wgc) {
   for (const x of ys) { const yr = m.years.find((z) => z.i === x.y && !z.partial); x.rep = yr ? yr.v : null; }
   const both = qs.filter((x) => x.rep !== null), latest = both.at(-1), last4 = both.slice(-4);
   const sumW = (a) => a.reduce((t, x) => t + x.v, 0), sumR = (a) => a.reduce((t, x) => t + x.rep, 0);
-  const hidden = (w, rp) => (w > 0 ? pct(Math.max(0, 1 - rp / w)) : "–");
+  // The undisclosed share only means something when reported buying lies between zero and the
+  // estimate. Turkey's sales made it −70 t in Q1 2026 (a "222%" share) and 2017's filings beat the
+  // estimate (a "0%" that was really −27%): those show a dash.
+  const share = (w, rp) => (w > 0 && rp >= 0 && rp <= w ? 1 - rp / w : null);
+  const hidden = (w, rp) => { const u = share(w, rp); return u === null ? "–" : pct(u); };
   const latestY = ys.filter((x) => x.rep !== null).at(-1);
   $("unreported-sub").textContent = "The WGC's estimate of all central bank buying, including purchases no country reports, against what reaches the IMF."
     + (last4.length ? ` Last ${plural(last4.length, "quarter")}: ${signed(sumW(last4))} estimated, ${signed(sumR(last4))} reported.` : "");
   foldSummary("unreported", last4.length
-    ? `${hidden(sumW(last4), sumR(last4))} of the WGC's estimate not disclosed by country over the last ${plural(last4.length, "quarter")} (${signed(sumW(last4))} vs ${signed(sumR(last4))} reported)`
+    ? `Last ${plural(last4.length, "quarter")}: WGC estimate ${signed(sumW(last4))}, reported ${signed(sumR(last4))}`
+      + (share(sumW(last4), sumR(last4)) !== null ? `, so ${hidden(sumW(last4), sumR(last4))} not in any country's filing` : "")
     : "The WGC's estimate of all central bank buying against what is reported");
   put("unreported-stats",
     latest ? dstat(`WGC estimate, ${qName(latest.q)}`, signed(latest.v), `from the ${latest.from} report`) : null,
@@ -2469,11 +2624,17 @@ function renderUnreported(m, wgc) {
       tipExtra: (k) => (qs[k].rep !== null ? [{ value: hidden(qs[k].v, qs[k].rep), label: "not disclosed by country" }] : [{ value: "–", label: "quarter not yet complete in the IMF data" }]),
     });
   } else emptyChart($("chart-unreported"));
-  // The Overview's caveat gets the measured share instead of a typed-in number that would go stale.
+  // The Overview's caveat gets the measured gap instead of a typed-in number that would go stale. It
+  // is this page's comparison (the WGC's estimate minus the IMF filings counted here), not a WGC
+  // figure, and one holder's swings sit inside it, so it says both.
   if (last4.length && $("caveat-text")) {
-    $("caveat-text").textContent = `The World Gold Council puts ${hidden(sumW(last4), sumR(last4))} of central bank buying in the last ${plural(last4.length, "quarter")} it has reported (to ${qName(latest.q)}) as not disclosed by country, so the true total is larger: read these figures for direction and pace.`;
+    const W = sumW(last4), R = sumR(last4), u = share(W, R);
+    const sw = m.sumSwing(last4[0].i - 2, latest.i);
+    $("caveat-text").textContent = `This page's comparison, not a WGC figure: the World Gold Council estimates central banks bought ${signed(W)} in the ${plural(last4.length, "quarter")} to ${qName(latest.q)}; IMF filings show ${signed(R)} (${SWING.name} ${signed(sw)} of that)`
+      + `${u !== null ? `, so about ${pct(u)} is in no country's filing` : ""}. Read these figures for direction and pace.`;
   }
-  $("unreported-note").replaceChildren(`Typed in by hand from the WGC's Gold Demand Trends${wgc.entered ? `, last on ${DAY.format(dayOf(wgc.entered))}` : ""}; it revises past quarters, sometimes by a lot. Edit `,
+  $("unreported-note").replaceChildren(`Typed in by hand from the WGC's Gold Demand Trends${wgc.entered ? `, last on ${DAY.format(dayOf(wgc.entered))}` : ""}; it revises past quarters, sometimes by a lot. `
+    + "“Not disclosed” is this page's comparison, one minus reported over estimated; a dash means reported buying was negative or above the estimate, so a share would mean nothing. Edit ",
     h("a", { href: "https://github.com/Vasuki8/gold-tracker/edit/main/data/wgc_central_banks.json" }, "data/wgc_central_banks.json"), " after each quarterly report.");
   const row = (x, name) => [name, signed(x.v), x.rep === null ? "–" : signed(x.rep), x.rep === null ? "–" : hidden(x.v, x.rep), x.from];
   put("table-unreported",

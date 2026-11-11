@@ -5,7 +5,8 @@ What changed in the IMF gold data since the last commit, and is it worth an aler
 Compares the previous gold_tonnes.json (the last committed copy) with the one just fetched:
 - per holder: months that are new, revised (by 0.05 t or more) or gone;
 - the page's headline gauge before and after: 12-month net, last 3 months, and the word the page
-  shows ("Speeding up", "Slowing", ...). This is a port of buildModel()/trendWord() in
+  shows ("Speeding up", "Slowing", ...), plus the 12-month and 3-month figures without Turkey
+  (r12x, prev12x, r3x), whose swings can move the headline on their own. This is a port of buildModel()/trendWord() in
   assets/app.js, kept to the parts the gauge needs; the two must count a month the same way.
 
 When anything changed it appends one entry to --log (data/changes.json, one entry per line,
@@ -35,6 +36,7 @@ from fetch_irfcl import pop_option  # noqa: E402
 COVERAGE_MIN = 0.9
 STALE_MONTHS = 6
 BRIDGE_MONTHS = 3
+SWING = "TUR"  # the headline is also given without this holder's changes (SWING in app.js)
 # What counts as news on its own.
 BIG_MOVE_T = 20.0      # one holder, one month
 BIG_REVISION_T = 10.0  # a past month revised by this much
@@ -115,21 +117,24 @@ def gauge(raw):
             continue
         activity[c] = sum(abs(change(s, i) or 0) for i in range(last - 11, last + 1))
     total = sum(activity.values())
-    net, coverage = {}, {}
+    net, swing, coverage = {}, {}, {}
     for i in range(first + 1, newest + 1):
         net[i] = sum(ch for s in hs.values() if (ch := change(s, i)) is not None)
+        swing[i] = change(hs[SWING], i) or 0 if SWING in hs else 0
         covered = sum(a for c, a in activity.items() if i in hs[c])
         coverage[i] = covered / total if total else 1
     complete = newest
     while complete > first + 12 and coverage[complete] < COVERAGE_MIN:
         complete -= 1
 
-    def sum_net(a, b):
-        return sum(net.get(i, 0) for i in range(a, b + 1))
+    def sum_net(a, b, without=False):
+        return sum(net.get(i, 0) - (swing.get(i, 0) if without else 0) for i in range(a, b + 1))
 
     r12, prev12, r3 = sum_net(complete - 11, complete), sum_net(complete - 23, complete - 12), sum_net(complete - 2, complete)
     return {"complete": key(complete), "newest": key(newest), "r12": round(r12, 1), "prev12": round(prev12, 1),
             "r3": round(r3, 1), "word": trend_word(r12, r3 * 4),
+            "r12x": round(sum_net(complete - 11, complete, True), 1), "prev12x": round(sum_net(complete - 23, complete - 12, True), 1),
+            "r3x": round(sum_net(complete - 2, complete, True), 1),
             "pending": {key(i): round(coverage[i], 3) for i in range(complete + 1, newest + 1)}}
 
 
@@ -182,6 +187,8 @@ def issue_text(entry, lines, page_url):
         f"| Totals complete through | {label(idx(b['complete']))} | {label(idx(a['complete']))} |",
         f"| Net reported buying, 12 months | {signed(b['r12'])} | {signed(a['r12'])} |",
         f"| Last 3 months | {signed(b['r3'])} | {signed(a['r3'])} |",
+        f"| 12 months, without Turkey | {signed(b['r12x']) if 'r12x' in b else '–'} | {signed(a['r12x'])} |",
+        f"| Last 3 months, without Turkey | {signed(b['r3x']) if 'r3x' in b else '–'} | {signed(a['r3x'])} |",
         f"| Gauge | {b['word']} | {a['word']} |",
     ]
     moves = sorted((x for x in entry["items"] if x["kind"] == "new" and x.get("move") not in (None, 0)),

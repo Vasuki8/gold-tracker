@@ -1,7 +1,9 @@
 {
- "note": "Your own file: edit it by hand (on GitHub: Edit this file, commit to main). trigger.t is the 12-month net reported buying, in tonnes, below which you re-examine your position; the page draws it on the trend chart and says how far the gauge is from it. trigger.placeholder marks the starting value; delete that line once you set a level of your own. entries are your notes, one per decision or observation; each is marked on the trend chart in its month and listed in the Journal section with the gauge as it read then.",
+ "note": "Your own file: edit it by hand (on GitHub: Edit this file, commit to main). trigger.t is the 12-month net reported buying, in tonnes, below which you re-examine your position; the page draws it on the trend chart and says how far the gauge is from it. trigger.basis says which 12-month figure the line is read against: \"without Turkey\" (Turkey alone took the full figure to +155 t for one month in March 2026) or \"all holders\". trigger.months is how many complete months in a row below the line count as crossing it (1 = the first month below). trigger.placeholder marks the starting value; delete that line once you set a level of your own. entries are your notes, one per decision or observation; each is marked on the trend chart in its month and listed in the Journal section with the gauge as it read then.",
  "trigger": {
   "t": 160,
+  "basis": "without Turkey",
+  "months": 1,
   "placeholder": true,
   "set": "2026-11-08",
   "why": "Half the pace at launch (+320 t over the 12 months to Aug 2026). If reported central bank buying halves, re-read the case for gold and gold-miner exposure. A starting point: change it to the number that would really make you act."

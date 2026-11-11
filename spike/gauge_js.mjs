@@ -33,5 +33,6 @@ for (let i = m.complete + 1; i <= m.newest; i++) pending[key(i)] = +m.months.get
 console.log(JSON.stringify({
   complete: key(m.complete), newest: key(m.newest),
   r12: +k.r12.toFixed(1), prev12: +k.prev12.toFixed(1), r3: +k.r3.toFixed(1),
-  word: trendWord(k.r12, k.pace).text, pending,
+  word: trendWord(k.r12, k.pace).text,
+  r12x: +k.x.r12.toFixed(1), prev12x: +k.x.prev12.toFixed(1), r3x: +k.x.r3.toFixed(1), pending,
 }));

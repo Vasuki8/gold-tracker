@@ -5,7 +5,8 @@ Do spike/changes.py and assets/app.js count a month the same way?
 changes.py carries a Python port of the page's gauge (buildModel()/headline()/trendWord()) so that
 the alert job can say "Speeding up" exactly when the page does. Nothing enforces that the two stay
 in step except this test: it runs both on the committed data and on a few edited copies of it
-(a late filer, a dropped month, a big purchase, a holder gone stale) and compares the gauges.
+(a late filer, a dropped month, a big purchase, a holder gone stale, Turkey absent) and compares
+the gauges, the figures without Turkey included.
 
     python spike/test_gauge.py            # exit 0 = every case agrees
 
@@ -68,6 +69,7 @@ def cases(raw):
     for code in list(c["countries"])[:20]:
         add_month(c, code, nxt, c["countries"][code][-1][1] - 3)
     yield f"20 holders report {nxt} with sales", c
+    c = copy.deepcopy(raw); c["countries"].pop("TUR", None); yield "Turkey absent (the without-Turkey figures equal the rest)", c
 
 
 def main():
@@ -84,7 +86,7 @@ def main():
             js, py = js_gauge(node, path), py_gauge(data)
             ok = js == py
             failed += not ok
-            print(f"  {'PASS' if ok else 'FAIL'}  {title}: {py['complete']} {py['word']} {py['r12']:+} t")
+            print(f"  {'PASS' if ok else 'FAIL'}  {title}: {py['complete']} {py['word']} {py['r12']:+} t ({py['r12x']:+} t without Turkey)")
             if not ok:
                 for k in sorted(set(js) | set(py)):
                     if js.get(k) != py.get(k):
