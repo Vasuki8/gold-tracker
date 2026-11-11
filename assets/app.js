@@ -1000,12 +1000,14 @@ function headline(m) {
 const pillClass = (w) => `pill ${w.icon === "▲" ? "up" : w.icon === "▼" ? "down" : ""}`;
 
 // The answer, first: 12-month net reported buying and the gauge's word, with the pace the word is
-// read from beside it. A small table puts each figure next to the same figure without Turkey, so a
-// reader sees at once whether one holder's swings make the story. The trend chart sits beside it.
+// read from beside it. A small table splits each figure into Turkey's own change and the rest
+// (all holders = Turkey + without Turkey), so a reader sees at once whether one holder's swings make
+// the story, and why "without Turkey" can be the larger number. The trend chart sits beside it.
 function renderHero(m) {
   const k = headline(m);
   const word = trendWord(k.r12, k.pace), wordX = trendWord(k.x.r12, k.x.pace);
-  const row = (label, a, b) => h("tr", {}, h("th", { scope: "row" }, label), h("td", {}, a), h("td", {}, b));
+  const row = (label, all, x) => h("tr", {}, h("th", { scope: "row" }, label),
+    h("td", {}, signed(all)), h("td", { class: "sw" }, signed(all - x)), h("td", {}, signed(x)));
   put("hero",
     h("h2", { class: "hero-label", id: "gauge-h" }, `Net reported buying · 12 months to ${mLabel(k.c)}`),
     h("p", { class: "hero-value" }, signed(k.r12)),
@@ -1014,12 +1016,13 @@ function renderHero(m) {
       h("span", {}, `last 3 months at ${signed(k.pace)} a year`),
       wordX.text !== word.text ? h("span", {}, `without ${SWING.name}: ${wordX.icon} ${wordX.text}`) : null),
     h("table", { class: "hero-split" },
-      h("caption", { class: "sr-only" }, `Net reported buying with and without ${SWING.name}, tonnes`),
-      h("thead", {}, h("tr", {}, h("td", {}), h("th", { scope: "col" }, "All holders"), h("th", { scope: "col" }, `Without ${SWING.name}`))),
+      h("caption", { class: "sr-only" }, `Net reported buying, tonnes: all holders, ${SWING.name}'s own change, and the rest without ${SWING.name}`),
+      h("thead", {}, h("tr", {}, h("td", {}), h("th", { scope: "col" }, "All holders"), h("th", { scope: "col", class: "sw" }, SWING.name),
+        h("th", { scope: "col" }, `Without ${SWING.name}`))),
       h("tbody", {},
-        row(`12 months to ${MONTH_ONLY.format(asDate(k.c))}`, signed(k.r12), signed(k.x.r12)),
-        row("The 12 months before", signed(k.prev12), signed(k.x.prev12)),
-        row("Pace, last 3 months", `${signed(k.pace)}/yr`, `${signed(k.x.pace)}/yr`))),
+        row(`12 months to ${MONTH_ONLY.format(asDate(k.c))}`, k.r12, k.x.r12),
+        row("12 months before", k.prev12, k.x.prev12),
+        row("3-month pace, a year", k.pace, k.x.pace))),
     h("p", { class: "hero-asof" }, `${mRange(k.c - 11, k.c)} · ${m.active} active holders · IMF IRFCL`));
 }
 

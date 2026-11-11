@@ -193,8 +193,12 @@ h2 { margin: 0 0 2px; font-size: 15.5px; font-weight: 700; letter-spacing: -0.02
 .hero-split { width: 100%; margin: 10px 0 0; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .hero-split th, .hero-split td { padding: 3px 0 3px 10px; border-top: 1px solid var(--border); text-align: right; white-space: nowrap; }
 .hero-split thead th, .hero-split thead td { border-top: 0; padding-bottom: 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
-.hero-split tbody th { padding-left: 0; text-align: left; font-weight: 400; color: var(--ink-2); white-space: normal; }
+.hero-split tbody th { padding-left: 0; text-align: left; font-weight: 400; color: var(--ink-2); }
+/* On a phone the column headers wrap ("Without / Turkey") so the row labels keep one line. */
+.hero-split thead th { white-space: normal; vertical-align: bottom; line-height: 1.3; }
+@media (max-width: 359.98px) { .hero-split tbody th { white-space: normal; } } /* the smallest phones: labels wrap too */
 .hero-split tbody td { color: var(--ink); font-weight: 600; }
+.hero-split td.sw { color: var(--ink-2); font-weight: 500; } /* Turkey's part: the difference, not a headline */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .hero-asof { margin: 8px 0 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); font-variant-numeric: tabular-nums; }
 /* Key numbers as a list: label and value on one line, the reason under them. */
